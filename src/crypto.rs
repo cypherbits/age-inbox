@@ -1,5 +1,4 @@
 use age::x25519::{Identity, Recipient};
-use argon2::Argon2;
 use std::str::FromStr;
 use anyhow::Result;
 
@@ -21,8 +20,6 @@ pub fn derive_keys(password: &str, vault_name: &str) -> Result<Keys> {
         salt_bytes[i] = (i as u8) ^ 0xAA;
     }
 
-    let argon2 = Argon2::default();
-    
     // Argon2 outputs variable length. We want 32 bytes for an x25519 key.
     let mut key_bytes = [0u8; 32];
     argon2::Argon2::default().hash_password_into(

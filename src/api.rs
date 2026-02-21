@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 use tokio::time::{Instant, Duration};
 use age::{Encryptor, Decryptor, x25519::{Identity, Recipient}};
 use std::path::PathBuf;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+
 use tokio_util::compat::{TokioAsyncWriteCompatExt, TokioAsyncReadCompatExt};
 use std::str::FromStr;
 use futures_util::StreamExt;
