@@ -1,0 +1,174 @@
+openapi: 3.0.3
+info:
+  title: Age Inbox API
+  description: A REST API for creating Age-encrypted password-protected file inboxes.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+paths:
+  /inbox:
+    post:
+      summary: Create a new vault/inbox
+      description: Derives an Age identity from the provided password and creates a new vault on disk.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - password
+              properties:
+                name:
+                  type: string
+                  description: Unique name for the vault. Path traversal characters are not allowed.
+                password:
+                  type: string
+                  description: High-entropy password to derive the key using Argon2id.
+      responses:
+        '200':
+          description: Vault successfully created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  public_key:
+                    type: string
+                    description: The Age generated public key recipient string.
+        '400':
+          description: Invalid vault name.
+        '409':
+          description: Vault already exists.
+  /inbox/{name}/upload:
+    post:
+      summary: Upload a file to a vault
+      description: Streams the request body through Age encryption and saves it directly to the vault folder.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+          description: The name of the vault.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+          text/plain:
+            schema:
+              type: string
+          '*/*':
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: File successfully encrypted and stored.
+        '400':
+          description: Invalid vault name.
+        '404':
+          description: Vault not found.
+  /inbox/{name}/unlock:
+    post:
+      summary: Temporarily unlock a vault
+      description: Validates the password and temporarily caches the derived Age private key in-memory for 1 hour.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+          description: The name of the vault.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - password
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Vault unlocked successfully.
+        '401':
+          description: Invalid password/unauthorized.
+        '404':
+          description: Vault not found/config missing.
+  /inbox/{name}/lock:
+    post:
+      summary: Immediately lock a vault
+      description: Purges the derived private key from memory for the specified vault.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+          description: The name of the vault.
+      responses:
+        '200':
+          description: Vault successfully locked.
+        '404':
+          description: Vault was not unlocked.
+  /inbox/{name}/list:
+    get:
+      summary: List files in an unlocked vault
+      description: Retrieves a list of file names in the vault. The vault must be currently unlocked.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+          description: The name of the vault.
+      responses:
+        '200':
+          description: JSON array of file names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '401':
+          description: Vault is locked or the 1-hour session expired.
+  /inbox/{name}/download/{file}:
+    get:
+      summary: Download and decrypt a file
+      description: Streams the requested encrypted file through Age decryption back to the client. The vault must be unlocked.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+          description: The name of the vault.
+        - in: path
+          name: file
+          required: true
+          schema:
+            type: string
+          description: The exact filename to download.
+      responses:
+        '200':
+          description: The decrypted file stream.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Vault is locked or session expired.
+        '404':
+          description: File not found.

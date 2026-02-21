@@ -1,0 +1,25 @@
+[package]
+name = "age-inbox"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["limit", "fs", "trace"] }
+age = { version = "0.10", features = ["async"] }
+argon2 = "0.5"
+secrecy = "0.8"
+zeroize = { version = "1.7", features = ["zeroize_derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+bytes = "1"
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["io", "compat"] }
+bech32 = "0.9"

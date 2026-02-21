@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  age-inbox:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - age-inbox-data:/app/vaults
+    restart: always
+
+volumes:
+  age-inbox-data:
