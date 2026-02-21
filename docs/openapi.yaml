@@ -88,6 +88,14 @@ paths:
             schema:
               type: string
               format: binary
+          'multipart/form-data':
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The binary file to encrypt and save.
           '*/*':
             schema:
               type: string

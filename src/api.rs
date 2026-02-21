@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::{Path, State},
+    extract::{Path, State, Request},
     http::{header, StatusCode},
     response::Response,
     routing::{get, post},
@@ -117,7 +117,7 @@ async fn create_inbox(
 async fn upload(
     State(state): State<AppState>,
     Path(name): Path<String>,
-    body: Body,
+    req: Request,
 ) -> Result<Json<GenericRes>, ApiError> {
     if !is_valid_name(&name) {
         return Err(make_error(StatusCode::BAD_REQUEST, "Invalid vault name"));
@@ -146,24 +146,49 @@ async fn upload(
     let recipient = Recipient::from_str(&pub_key_str).map_err(|_e| make_error(StatusCode::INTERNAL_SERVER_ERROR, "Invalid public key"))?;
     
     let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let filename = format!("upload_{}.age", timestamp);
-    let filepath = vault_dir.join(&filename);
+    let filepath = vault_dir.join(format!("upload_{}.age", timestamp));
 
     let file = tokio::fs::File::create(&filepath).await.map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
     let encryptor = Encryptor::with_recipients(vec![Box::new(recipient)]).expect("we provided a recipient");
     let mut async_writer = encryptor.wrap_async_output(file.compat_write()).await.map_err(|e: age::EncryptError| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let mut stream = body.into_data_stream();
-    while let Some(chunk) = stream.next().await {
-        let data = chunk.map_err(|e: axum::Error| make_error(StatusCode::BAD_REQUEST, e.to_string()))?;
-        futures_util::AsyncWriteExt::write_all(&mut async_writer, &data).await.map_err(|e: std::io::Error| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let is_multipart = req.headers().get(header::CONTENT_TYPE)
+        .and_then(|val| val.to_str().ok())
+        .map_or(false, |s| s.starts_with("multipart/form-data"));
+
+    if is_multipart {
+        use axum::extract::FromRequest;
+        let mut multipart = axum::extract::Multipart::from_request(req, &state).await
+            .map_err(|e| make_error(StatusCode::BAD_REQUEST, format!("Invalid multipart: {}", e)))?;
+        
+        let mut found_file = false;
+        while let Some(mut field) = multipart.next_field().await.map_err(|e: axum::extract::multipart::MultipartError| make_error(StatusCode::BAD_REQUEST, e.to_string()))? {
+            if field.name() == Some("file") {
+                found_file = true;
+                while let Some(chunk) = field.chunk().await.map_err(|e: axum::extract::multipart::MultipartError| make_error(StatusCode::BAD_REQUEST, e.to_string()))? {
+                    futures_util::AsyncWriteExt::write_all(&mut async_writer, &chunk).await.map_err(|e: std::io::Error| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                }
+                break; // Only process the first "file" field
+            }
+        }
+        if !found_file {
+            return Err(make_error(StatusCode::BAD_REQUEST, "Missing 'file' field in multipart form"));
+        }
+    } else {
+        // Raw body fallback
+        let body = req.into_body();
+        let mut stream = body.into_data_stream();
+        while let Some(chunk) = stream.next().await {
+            let data = chunk.map_err(|e: axum::Error| make_error(StatusCode::BAD_REQUEST, e.to_string()))?;
+            futures_util::AsyncWriteExt::write_all(&mut async_writer, &data).await.map_err(|e: std::io::Error| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }
     }
     
     futures_util::AsyncWriteExt::flush(&mut async_writer).await.map_err(|e: std::io::Error| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     futures_util::AsyncWriteExt::close(&mut async_writer).await.map_err(|e: std::io::Error| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(GenericRes { message: format!("File {} uploaded successfully", filename) }))
+    Ok(Json(GenericRes { message: format!("File upload_{}.age uploaded successfully", timestamp) }))
 }
 
 async fn unlock(
