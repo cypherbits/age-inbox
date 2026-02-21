@@ -3,14 +3,30 @@ info:
   title: Age Inbox API
   description: A REST API for creating Age-encrypted password-protected file inboxes.
   version: 1.0.0
+  license:
+    name: MIT
 servers:
-  - url: http://localhost:3000
+  - url: http://127.0.0.1:3000
     description: Local development server
+components:
+  schemas:
+    GenericRes:
+      type: object
+      properties:
+        message:
+          type: string
+    ErrorRes:
+      type: object
+      properties:
+        error:
+          type: string
 paths:
   /inbox:
     post:
+      operationId: createInbox
       summary: Create a new vault/inbox
       description: Derives an Age identity from the provided password and creates a new vault on disk.
+      security: []
       requestBody:
         required: true
         content:
@@ -23,10 +39,10 @@ paths:
               properties:
                 name:
                   type: string
-                  description: Unique name for the vault. Path traversal characters are not allowed.
+                  description: Unique name for the vault.
                 password:
                   type: string
-                  description: High-entropy password to derive the key using Argon2id.
+                  description: Password to derive the key using Argon2id.
       responses:
         '200':
           description: Vault successfully created.
@@ -39,15 +55,24 @@ paths:
                     type: boolean
                   public_key:
                     type: string
-                    description: The Age generated public key recipient string.
         '400':
           description: Invalid vault name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
         '409':
           description: Vault already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
   /inbox/{name}/upload:
     post:
+      operationId: uploadFile
       summary: Upload a file to a vault
-      description: Streams the request body through Age encryption and saves it directly to the vault folder.
+      description: Streams the request body in binary format through Age encryption and saves it directly to the vault folder.
+      security: []
       parameters:
         - in: path
           name: name
@@ -57,14 +82,12 @@ paths:
           description: The name of the vault.
       requestBody:
         required: true
+        description: The raw binary data of the file to encrypt and save.
         content:
           application/octet-stream:
             schema:
               type: string
               format: binary
-          text/plain:
-            schema:
-              type: string
           '*/*':
             schema:
               type: string
@@ -72,14 +95,28 @@ paths:
       responses:
         '200':
           description: File successfully encrypted and stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericRes'
         '400':
           description: Invalid vault name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
         '404':
           description: Vault not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
   /inbox/{name}/unlock:
     post:
+      operationId: unlockVault
       summary: Temporarily unlock a vault
       description: Validates the password and temporarily caches the derived Age private key in-memory for 1 hour.
+      security: []
       parameters:
         - in: path
           name: name
@@ -101,14 +138,28 @@ paths:
       responses:
         '200':
           description: Vault unlocked successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericRes'
         '401':
           description: Invalid password/unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
         '404':
           description: Vault not found/config missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
   /inbox/{name}/lock:
     post:
+      operationId: lockVault
       summary: Immediately lock a vault
       description: Purges the derived private key from memory for the specified vault.
+      security: []
       parameters:
         - in: path
           name: name
@@ -119,12 +170,22 @@ paths:
       responses:
         '200':
           description: Vault successfully locked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericRes'
         '404':
           description: Vault was not unlocked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
   /inbox/{name}/list:
     get:
+      operationId: listFiles
       summary: List files in an unlocked vault
       description: Retrieves a list of file names in the vault. The vault must be currently unlocked.
+      security: []
       parameters:
         - in: path
           name: name
@@ -143,10 +204,16 @@ paths:
                   type: string
         '401':
           description: Vault is locked or the 1-hour session expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
   /inbox/{name}/download/{file}:
     get:
+      operationId: downloadFile
       summary: Download and decrypt a file
-      description: Streams the requested encrypted file through Age decryption back to the client. The vault must be unlocked.
+      description: Streams the requested encrypted file in binary format through Age decryption back to the client. The vault must be unlocked.
+      security: []
       parameters:
         - in: path
           name: name
@@ -162,7 +229,7 @@ paths:
           description: The exact filename to download.
       responses:
         '200':
-          description: The decrypted file stream.
+          description: The decrypted binary file stream.
           content:
             application/octet-stream:
               schema:
@@ -170,5 +237,13 @@ paths:
                 format: binary
         '401':
           description: Vault is locked or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
         '404':
           description: File not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
