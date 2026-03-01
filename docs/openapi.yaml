@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Age Inbox API
   description: A REST API for creating Age-encrypted password-protected file inboxes. Now supports encrypted metadata and subfolders on-the-fly.
-  version: 1.1.0
+  version: 1.2.0
   license:
     name: MIT
 servers:
@@ -66,7 +66,7 @@ paths:
     post:
       operationId: uploadFileRoot
       summary: Upload a file to a vault root
-      description: Streams the request body in binary format through Age encryption and saves it directly to the vault root folder. Generates a separate `.meta.age` encrypted file.
+      description: Streams request body through Age encryption and saves to the vault root. Metadata must be sent in `multipart/form-data` fields to avoid HTTP header size limits. Generates a separate `.meta.age` encrypted file.
       security: []
       parameters:
         - in: path
@@ -75,27 +75,9 @@ paths:
           schema:
             type: string
           description: The name of the vault.
-        - in: header
-          name: X-Filename
-          required: false
-          schema:
-            type: string
-          description: Optional original filename.
-        - in: header
-          name: X-File-Origin
-          required: false
-          schema:
-            type: string
-          description: Optional origin URL or source.
-        - in: header
-          name: X-Extended-Metadata
-          required: false
-          schema:
-            type: string
-          description: JSON object representing additional metadata attributes.
       requestBody:
         required: true
-        description: The raw binary data of the file to encrypt and save.
+        description: Raw binary data or multipart payload. For metadata (`filename`, `origin`, `extended`) use multipart fields.
         content:
           application/octet-stream:
             schema:
@@ -118,10 +100,6 @@ paths:
                   type: string
                   format: binary
                   description: The binary file to encrypt and save.
-          '*/*':
-            schema:
-              type: string
-              format: binary
       responses:
         '200':
           description: File successfully encrypted and stored with metadata.
@@ -129,7 +107,7 @@ paths:
     post:
       operationId: uploadFilePath
       summary: Upload a file to a subfolder within a vault
-      description: Encrypts passing stream directly to a nested folder inside the vault. Fails if vault configuration disabled nested folders.
+      description: Encrypts stream directly to a nested folder inside the vault. Metadata must be sent in `multipart/form-data` fields to avoid HTTP header size limits. Fails if vault configuration disabled nested folders.
       security: []
       parameters:
         - in: path
@@ -144,24 +122,9 @@ paths:
           schema:
             type: string
           description: The relative subfolder path.
-        - in: header
-          name: X-Filename
-          required: false
-          schema:
-            type: string
-        - in: header
-          name: X-File-Origin
-          required: false
-          schema:
-            type: string
-        - in: header
-          name: X-Extended-Metadata
-          required: false
-          schema:
-            type: string
       requestBody:
         required: true
-        description: File payload stream or multipart form.
+        description: File payload stream or multipart form. Use multipart to include metadata fields.
         content:
           application/octet-stream:
             schema:

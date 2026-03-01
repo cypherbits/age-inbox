@@ -11,8 +11,6 @@ async fn upload_root_raw_success() {
 
     let response = client
         .post(format!("{}/inbox/testvault/upload", base_url))
-        .header("X-Filename", "root.txt")
-        .header("X-File-Origin", "unit-test")
         .body("hello world")
         .send()
         .await

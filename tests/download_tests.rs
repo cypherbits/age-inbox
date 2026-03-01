@@ -10,10 +10,17 @@ async fn download_returns_decrypted_file() {
     let client = reqwest::Client::new();
     common::create_vault(&client, &base_url, true).await;
 
+    let form = reqwest::multipart::Form::new()
+        .text("filename", "secret.txt")
+        .part(
+            "file",
+            reqwest::multipart::Part::bytes(b"hello world raw!".to_vec())
+                .file_name("secret.txt"),
+        );
+
     let upload = client
         .post(format!("{}/inbox/testvault/upload", base_url))
-        .header("X-Filename", "secret.txt")
-        .body("hello world raw!")
+        .multipart(form)
         .send()
         .await
         .unwrap();
@@ -41,6 +48,13 @@ async fn download_returns_decrypted_file() {
         .unwrap();
 
     assert_eq!(downloaded.status(), StatusCode::OK);
+    let content_disposition = downloaded
+        .headers()
+        .get("content-disposition")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    assert!(content_disposition.contains("filename=\"secret.txt\""));
+    assert!(!content_disposition.contains(".age\""));
     assert_eq!(downloaded.text().await.unwrap(), "hello world raw!");
 }
 

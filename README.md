@@ -27,30 +27,37 @@ For a fully interactive schema, explore the OpenAPI 3 specification located in `
 
 - **Create Inbox**
   - `POST /inbox`
-  - Body: `{"name": "myvault", "password": "super-secret"}`
+  - Body: `{"name": "myvault", "password": "super-secret", "allow_subfolders": false}`
   - *Generates a new `.inbox-age.config` with the vault's derived public footprint.*
 
-- **Upload File**
-  - `POST /inbox/:name/upload`
+- **Upload File (Vault Root)**
+  - `POST /inbox/{name}/upload`
   - Body: Raw binary stream (`application/octet-stream`) OR `multipart/form-data` with a `file` field.
-  - *Streams the upload through X25519 encryption and saves an `.age` file to disk.*
+  - Metadata (`filename`, `origin`, `extended`) must be sent as multipart fields, not HTTP headers.
+  - *Streams the upload through X25519 encryption and saves `.age` and `.meta.age` files.*
+
+- **Upload File (Subfolder)**
+  - `POST /inbox/{name}/upload/{path}`
+  - Body: Raw binary stream (`application/octet-stream`) OR `multipart/form-data` with a `file` field.
+  - Metadata (`filename`, `origin`, `extended`) must be sent as multipart fields, not HTTP headers.
+  - *Stores encrypted files in a nested path when `allow_subfolders` is enabled.*
 
 - **Unlock Vault**
-  - `POST /inbox/:name/unlock`
+  - `POST /inbox/{name}/unlock`
   - Body: `{"password": "super-secret"}`
   - *Derives the private vault key and temporarily caches it in memory (1 hr expiration).*
 
 - **Lock Vault**
-  - `POST /inbox/:name/lock`
+  - `POST /inbox/{name}/lock`
   - *Purges the private key early from in-memory state.*
 
 - **List Files**
-  - `GET /inbox/:name/list`
+  - `GET /inbox/{name}/list`
   - *Lists available encrypted files inside an unlocked vault.*
 
 - **Download File**
-  - `GET /inbox/:name/download/:file`
-  - *Streams the encrypted file from disk through the `Decryptor` to the HTTP Client response.*
+  - `GET /inbox/{name}/download/{path}`
+  - *Streams the encrypted file from disk through the `Decryptor` to the HTTP client response.*
 
 ## Deployment
 

@@ -5,13 +5,57 @@ use axum::{
     http::{header, StatusCode},
     response::Response,
 };
+use tokio::io::AsyncReadExt;
 use tokio::time::Instant;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
 use super::{
-    types::{make_error, ApiError, AppState},
+    types::{make_error, ApiError, AppState, FileMetadata},
     validation::{is_valid_name, is_valid_subpath},
 };
+
+fn metadata_path_for(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let file_name = path.file_name()?.to_str()?;
+    if !file_name.ends_with(".age") || file_name.ends_with(".meta.age") {
+        return None;
+    }
+
+    let meta_name = file_name.trim_end_matches(".age").to_string() + ".meta.age";
+    Some(path.with_file_name(meta_name))
+}
+
+async fn metadata_filename(
+    encrypted_file_path: &std::path::Path,
+    identity: &age::x25519::Identity,
+) -> Option<String> {
+    let meta_path = metadata_path_for(encrypted_file_path)?;
+    if !meta_path.exists() {
+        return None;
+    }
+
+    let meta_file = tokio::fs::File::open(meta_path).await.ok()?;
+    let decryptor = match Decryptor::new_async(meta_file.compat()).await.ok()? {
+        Decryptor::Recipients(d) => d,
+        _ => return None,
+    };
+
+    let async_reader = decryptor
+        .decrypt_async(std::iter::once(identity as &dyn age::Identity))
+        .ok()?;
+    let mut reader = async_reader.compat();
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).await.ok()?;
+
+    let metadata: FileMetadata = serde_json::from_slice(&bytes).ok()?;
+    metadata
+        .filename
+        .and_then(|name| {
+            std::path::Path::new(&name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(ToString::to_string)
+        })
+}
 
 /// Downloads and decrypts a file from an unlocked vault.
 pub(crate) async fn download_file(
@@ -74,11 +118,19 @@ pub(crate) async fn download_file(
         .map(|n| n.trim_end_matches(".age"))
         .unwrap_or("file");
 
+    let resolved_filename = if path.ends_with(".meta.age") {
+        display_filename.to_string()
+    } else {
+        metadata_filename(&filepath, &identity)
+            .await
+            .unwrap_or_else(|| display_filename.to_string())
+    };
+
     axum::response::Response::builder()
         .status(StatusCode::OK)
         .header(
             header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", display_filename),
+            format!("attachment; filename=\"{}\"", resolved_filename),
         )
         .header(header::CONTENT_TYPE, content_type)
         .body(body)

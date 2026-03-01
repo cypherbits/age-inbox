@@ -216,21 +216,7 @@ async fn handle_raw_upload(
     req: Request,
     async_writer: &mut (impl futures_util::AsyncWriteExt + Unpin),
 ) -> Result<FileMetadata, ApiError> {
-    let mut metadata = FileMetadata::default();
-
-    if let Some(orig) = req.headers().get("X-File-Origin") {
-        metadata.origin = orig.to_str().ok().map(ToString::to_string);
-    }
-    if let Some(fname) = req.headers().get("X-Filename") {
-        metadata.filename = fname.to_str().ok().map(ToString::to_string);
-    }
-    if let Some(ext) = req.headers().get("X-Extended-Metadata") {
-        if let Some(ext_str) = ext.to_str().ok() {
-            if let Ok(ext_map) = serde_json::from_str(ext_str) {
-                metadata.extended = ext_map;
-            }
-        }
-    }
+    let metadata = FileMetadata::default();
 
     let body: Body = req.into_body();
     let mut stream = body.into_data_stream();
