@@ -53,7 +53,7 @@ For a fully interactive schema, explore the OpenAPI 3 specification located in `
 
 - **List Files**
   - `GET /inbox/{name}/list`
-  - *Lists available encrypted files inside an unlocked vault.*
+  - *Lists encrypted files (excluding `.meta.age`) and includes optional metadata summary fields: `filename` and `origin`.*
 
 - **Download File**
   - `GET /inbox/{name}/download/{path}`

@@ -57,3 +57,10 @@ pub struct FileMetadata {
     #[serde(flatten)]
     pub extended: HashMap<String, serde_json::Value>,
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct ListedFile {
+    pub path: String,
+    pub filename: Option<String>,
+    pub origin: Option<String>,
+}

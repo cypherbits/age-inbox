@@ -1,6 +1,7 @@
 mod common;
 
 use age_inbox::api::FileMetadata;
+use age_inbox::api::ListedFile;
 use axum::http::StatusCode;
 
 /// Download endpoint decrypts uploaded raw files.
@@ -33,13 +34,14 @@ async fn download_returns_decrypted_file() {
         .send()
         .await
         .unwrap();
-    let files: Vec<String> = list.json().await.unwrap();
+    let files: Vec<ListedFile> = list.json().await.unwrap();
 
     let root_file = files
         .iter()
-        .find(|f| !f.ends_with(".meta.age"))
+        .map(|f| f.path.clone())
+        .find(|f| f.ends_with(".age") && !f.ends_with(".meta.age"))
         .unwrap()
-        .to_owned();
+        .to_string();
 
     let downloaded = client
         .get(format!("{}/inbox/testvault/download/{}", base_url, root_file))
@@ -89,19 +91,16 @@ async fn metadata_endpoint_returns_json_and_download_rejects_sidecar() {
         .send()
         .await
         .unwrap();
-    let files: Vec<String> = list.json().await.unwrap();
-
-    let meta_file = files
-        .iter()
-        .find(|f| f.ends_with(".meta.age"))
-        .unwrap()
-        .to_owned();
+    let files: Vec<ListedFile> = list.json().await.unwrap();
 
     let data_file = files
         .iter()
+        .map(|f| f.path.clone())
         .find(|f| f.ends_with(".age") && !f.ends_with(".meta.age"))
         .unwrap()
-        .to_owned();
+        .to_string();
+
+    let meta_file = format!("{}.meta.age", data_file.trim_end_matches(".age"));
 
     let invalid_download = client
         .get(format!("{}/inbox/testvault/download/{}", base_url, meta_file))

@@ -30,6 +30,19 @@ components:
           type: string
           nullable: true
       additionalProperties: true
+    ListedFile:
+      type: object
+      properties:
+        path:
+          type: string
+        filename:
+          type: string
+          nullable: true
+        origin:
+          type: string
+          nullable: true
+      required:
+        - path
 paths:
   /inbox:
     post:
@@ -203,7 +216,7 @@ paths:
     get:
       operationId: listFiles
       summary: List files in an unlocked vault
-      description: Recursively retrieves paths of files inside the vault. The vault must be unlocked.
+      description: Recursively retrieves encrypted file paths (excluding metadata sidecars). If metadata is available, includes only `filename` and `origin` for each file.
       parameters:
         - in: path
           name: name
@@ -212,13 +225,13 @@ paths:
             type: string
       responses:
         '200':
-          description: JSON array of relative file paths.
+          description: JSON array of file items with optional metadata summary.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  type: string
+                  $ref: '#/components/schemas/ListedFile'
         '401':
           description: Vault is locked.
   /inbox/{name}/download/{path}:

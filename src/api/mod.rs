@@ -17,7 +17,7 @@ mod unlock;
 mod upload;
 mod validation;
 
-pub use types::{AppState, CreateInboxRes, FileMetadata};
+pub use types::{AppState, CreateInboxRes, FileMetadata, ListedFile};
 
 fn env_var(name: &str) -> Option<String> {
     env::var(name)
