@@ -11,6 +11,7 @@ mod create_inbox;
 mod download;
 mod list_files;
 mod lock;
+mod metadata;
 mod types;
 mod unlock;
 mod upload;
@@ -114,6 +115,7 @@ pub fn router(state: AppState) -> Router {
         .route("/inbox/:name/lock", post(lock::lock))
         .route("/inbox/:name/list", get(list_files::list_files))
         .route("/inbox/:name/download/*path", get(download::download_file))
+        .route("/inbox/:name/metadata/*path", get(metadata::download_metadata))
         .with_state(state);
 
     if let Some(cors) = cors_layer_from_env() {

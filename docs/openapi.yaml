@@ -20,6 +20,16 @@ components:
       properties:
         error:
           type: string
+    FileMetadata:
+      type: object
+      properties:
+        filename:
+          type: string
+          nullable: true
+        origin:
+          type: string
+          nullable: true
+      additionalProperties: true
 paths:
   /inbox:
     post:
@@ -215,7 +225,7 @@ paths:
     get:
       operationId: downloadFile
       summary: Download and decrypt a file
-      description: Streams requested encrypted file (including metadata files `.meta.age`) back to the client decrypted.
+      description: Streams requested encrypted file back to the client decrypted. This endpoint only accepts file paths ending in `.age` (excluding `.meta.age`).
       parameters:
         - in: path
           name: name
@@ -230,11 +240,43 @@ paths:
           description: Relative path for the file inside the vault.
       responses:
         '200':
-          description: The decrypted binary file. Metadatas return as JSON content type.
+          description: The decrypted binary file.
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
+        '400':
+          description: Invalid path or metadata sidecar path provided.
         '401':
           description: Session locked.
+  /inbox/{name}/metadata/{path}:
+    get:
+      operationId: downloadMetadata
+      summary: Get decrypted metadata for a file
+      description: Returns decrypted metadata from the sidecar `.meta.age` associated with an encrypted file path.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: path
+          required: true
+          schema:
+            type: string
+          description: Relative path to the encrypted file inside the vault (must end with `.age` and not `.meta.age`).
+      responses:
+        '200':
+          description: Decrypted metadata as JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileMetadata'
+        '400':
+          description: Invalid path.
+        '401':
+          description: Session locked.
+        '404':
+          description: Metadata sidecar not found.

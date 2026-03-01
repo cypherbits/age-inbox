@@ -58,9 +58,9 @@ async fn download_returns_decrypted_file() {
     assert_eq!(downloaded.text().await.unwrap(), "hello world raw!");
 }
 
-/// Metadata files are also decrypted and returned as JSON payloads.
+/// Metadata is exposed via dedicated endpoint and metadata sidecars are rejected by download.
 #[tokio::test]
-async fn download_metadata_json() {
+async fn metadata_endpoint_returns_json_and_download_rejects_sidecar() {
     let (base_url, _dir) = common::setup_app().await;
     let client = reqwest::Client::new();
     common::create_vault(&client, &base_url, true).await;
@@ -97,8 +97,22 @@ async fn download_metadata_json() {
         .unwrap()
         .to_owned();
 
-    let metadata_response = client
+    let data_file = files
+        .iter()
+        .find(|f| f.ends_with(".age") && !f.ends_with(".meta.age"))
+        .unwrap()
+        .to_owned();
+
+    let invalid_download = client
         .get(format!("{}/inbox/testvault/download/{}", base_url, meta_file))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(invalid_download.status(), StatusCode::BAD_REQUEST);
+
+    let metadata_response = client
+        .get(format!("{}/inbox/testvault/metadata/{}", base_url, data_file))
         .send()
         .await
         .unwrap();

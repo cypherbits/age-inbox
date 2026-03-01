@@ -57,7 +57,11 @@ For a fully interactive schema, explore the OpenAPI 3 specification located in `
 
 - **Download File**
   - `GET /inbox/{name}/download/{path}`
-  - *Streams the encrypted file from disk through the `Decryptor` to the HTTP client response.*
+  - *Returns only the decrypted file content (not metadata sidecars).* 
+
+- **Get File Metadata**
+  - `GET /inbox/{name}/metadata/{path}`
+  - *Returns decrypted metadata JSON for the encrypted file path.*
 
 ## Deployment
 

@@ -66,6 +66,13 @@ pub(crate) async fn download_file(
         return Err(make_error(StatusCode::BAD_REQUEST, "Invalid name or path"));
     }
 
+    if !path.ends_with(".age") || path.ends_with(".meta.age") {
+        return Err(make_error(
+            StatusCode::BAD_REQUEST,
+            "Path must point to an encrypted file (.age). Use /metadata for metadata.",
+        ));
+    }
+
     let identity = {
         let mut vaults = state.unlocked_vaults.write().await;
         if let Some(vault) = vaults.get(&name) {
@@ -106,11 +113,7 @@ pub(crate) async fn download_file(
     let stream = tokio_util::io::ReaderStream::new(async_reader.compat());
     let body = Body::from_stream(stream);
 
-    let content_type = if path.ends_with(".meta.age") {
-        "application/json"
-    } else {
-        "application/octet-stream"
-    };
+    let content_type = "application/octet-stream";
 
     let display_filename = std::path::Path::new(&path)
         .file_name()
@@ -118,13 +121,9 @@ pub(crate) async fn download_file(
         .map(|n| n.trim_end_matches(".age"))
         .unwrap_or("file");
 
-    let resolved_filename = if path.ends_with(".meta.age") {
-        display_filename.to_string()
-    } else {
-        metadata_filename(&filepath, &identity)
-            .await
-            .unwrap_or_else(|| display_filename.to_string())
-    };
+    let resolved_filename = metadata_filename(&filepath, &identity)
+        .await
+        .unwrap_or_else(|| display_filename.to_string());
 
     axum::response::Response::builder()
         .status(StatusCode::OK)
