@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Age Inbox API
-  description: A REST API for creating Age-encrypted password-protected file inboxes.
-  version: 1.0.0
+  description: A REST API for creating Age-encrypted password-protected file inboxes. Now supports encrypted metadata and subfolders on-the-fly.
+  version: 1.1.0
   license:
     name: MIT
 servers:
@@ -43,6 +43,9 @@ paths:
                 password:
                   type: string
                   description: Password to derive the key using Argon2id.
+                allow_subfolders:
+                  type: boolean
+                  description: Configuration to allow creation of folders on the fly during upload. Default is false.
       responses:
         '200':
           description: Vault successfully created.
@@ -57,21 +60,13 @@ paths:
                     type: string
         '400':
           description: Invalid vault name.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
         '409':
           description: Vault already exists.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
   /inbox/{name}/upload:
     post:
-      operationId: uploadFile
-      summary: Upload a file to a vault
-      description: Streams the request body in binary format through Age encryption and saves it directly to the vault folder.
+      operationId: uploadFileRoot
+      summary: Upload a file to a vault root
+      description: Streams the request body in binary format through Age encryption and saves it directly to the vault root folder. Generates a separate `.meta.age` encrypted file.
       security: []
       parameters:
         - in: path
@@ -80,6 +75,24 @@ paths:
           schema:
             type: string
           description: The name of the vault.
+        - in: header
+          name: X-Filename
+          required: false
+          schema:
+            type: string
+          description: Optional original filename.
+        - in: header
+          name: X-File-Origin
+          required: false
+          schema:
+            type: string
+          description: Optional origin URL or source.
+        - in: header
+          name: X-Extended-Metadata
+          required: false
+          schema:
+            type: string
+          description: JSON object representing additional metadata attributes.
       requestBody:
         required: true
         description: The raw binary data of the file to encrypt and save.
@@ -92,6 +105,15 @@ paths:
             schema:
               type: object
               properties:
+                filename:
+                  type: string
+                  description: The original filename.
+                origin:
+                  type: string
+                  description: The source origin string.
+                extended:
+                  type: string
+                  description: A JSON encoded object of additional external properties.
                 file:
                   type: string
                   format: binary
@@ -102,23 +124,67 @@ paths:
               format: binary
       responses:
         '200':
-          description: File successfully encrypted and stored.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GenericRes'
-        '400':
-          description: Invalid vault name.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
-        '404':
-          description: Vault not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
+          description: File successfully encrypted and stored with metadata.
+  /inbox/{name}/upload/{path}:
+    post:
+      operationId: uploadFilePath
+      summary: Upload a file to a subfolder within a vault
+      description: Encrypts passing stream directly to a nested folder inside the vault. Fails if vault configuration disabled nested folders.
+      security: []
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+          description: The name of the vault.
+        - in: path
+          name: path
+          required: true
+          schema:
+            type: string
+          description: The relative subfolder path.
+        - in: header
+          name: X-Filename
+          required: false
+          schema:
+            type: string
+        - in: header
+          name: X-File-Origin
+          required: false
+          schema:
+            type: string
+        - in: header
+          name: X-Extended-Metadata
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: File payload stream or multipart form.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+          'multipart/form-data':
+            schema:
+              type: object
+              properties:
+                filename:
+                  type: string
+                origin:
+                  type: string
+                extended:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: File stored within the specified bounded nested folder.
+        '403':
+          description: Subfolders prohibited by configuration.
   /inbox/{name}/unlock:
     post:
       operationId: unlockVault
@@ -131,7 +197,6 @@ paths:
           required: true
           schema:
             type: string
-          description: The name of the vault.
       requestBody:
         required: true
         content:
@@ -146,64 +211,35 @@ paths:
       responses:
         '200':
           description: Vault unlocked successfully.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GenericRes'
         '401':
           description: Invalid password/unauthorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
-        '404':
-          description: Vault not found/config missing.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
   /inbox/{name}/lock:
     post:
       operationId: lockVault
       summary: Immediately lock a vault
-      description: Purges the derived private key from memory for the specified vault.
-      security: []
       parameters:
         - in: path
           name: name
           required: true
           schema:
             type: string
-          description: The name of the vault.
       responses:
         '200':
-          description: Vault successfully locked.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GenericRes'
-        '404':
-          description: Vault was not unlocked.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
+          description: Vault locked.
   /inbox/{name}/list:
     get:
       operationId: listFiles
       summary: List files in an unlocked vault
-      description: Retrieves a list of file names in the vault. The vault must be currently unlocked.
-      security: []
+      description: Recursively retrieves paths of files inside the vault. The vault must be unlocked.
       parameters:
         - in: path
           name: name
           required: true
           schema:
             type: string
-          description: The name of the vault.
       responses:
         '200':
-          description: JSON array of file names.
+          description: JSON array of relative file paths.
           content:
             application/json:
               schema:
@@ -211,47 +247,31 @@ paths:
                 items:
                   type: string
         '401':
-          description: Vault is locked or the 1-hour session expired.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
-  /inbox/{name}/download/{file}:
+          description: Vault is locked.
+  /inbox/{name}/download/{path}:
     get:
       operationId: downloadFile
       summary: Download and decrypt a file
-      description: Streams the requested encrypted file in binary format through Age decryption back to the client. The vault must be unlocked.
-      security: []
+      description: Streams requested encrypted file (including metadata files `.meta.age`) back to the client decrypted.
       parameters:
         - in: path
           name: name
           required: true
           schema:
             type: string
-          description: The name of the vault.
         - in: path
-          name: file
+          name: path
           required: true
           schema:
             type: string
-          description: The exact filename to download.
+          description: Relative path for the file inside the vault.
       responses:
         '200':
-          description: The decrypted binary file stream.
+          description: The decrypted binary file. Metadatas return as JSON content type.
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
         '401':
-          description: Vault is locked or session expired.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
-        '404':
-          description: File not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
+          description: Session locked.

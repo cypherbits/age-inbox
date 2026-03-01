@@ -1,7 +1,6 @@
-mod api;
-mod crypto;
+use age_inbox::api;
 
-use api::AppState;
+use age_inbox::api::AppState;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

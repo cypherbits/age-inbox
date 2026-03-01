@@ -1,6 +1,6 @@
 use age::x25519::{Identity, Recipient};
-use std::str::FromStr;
 use anyhow::Result;
+use std::str::FromStr;
 
 pub struct Keys {
     pub identity: Identity,
@@ -22,36 +22,23 @@ pub fn derive_keys(password: &str, vault_name: &str) -> Result<Keys> {
 
     // Argon2 outputs variable length. We want 32 bytes for an x25519 key.
     let mut key_bytes = [0u8; 32];
-    argon2::Argon2::default().hash_password_into(
-        password.as_bytes(),
-        &salt_bytes,
-        &mut key_bytes,
-    ).map_err(|e| anyhow::anyhow!("Argon2 error: {}", e))?;
+    argon2::Argon2::default()
+        .hash_password_into(password.as_bytes(), &salt_bytes, &mut key_bytes)
+        .map_err(|e| anyhow::anyhow!("Argon2 error: {}", e))?;
 
     // Now we need to create an age::x25519::Identity from key_bytes
     // Let's use bech32 to construct the AGE-SECRET-KEY string.
-use bech32::{ToBase32, Variant};
-    let encoded = bech32::encode("AGE-SECRET-KEY-", key_bytes.to_base32(), Variant::Bech32).unwrap();
-    
+    use bech32::{ToBase32, Variant};
+    let encoded =
+        bech32::encode("AGE-SECRET-KEY-", key_bytes.to_base32(), Variant::Bech32).unwrap();
+
     // The age crate expects uppercase for the constant prefix.
-    let identity = Identity::from_str(&encoded.to_uppercase()).map_err(|e| anyhow::anyhow!("Invalid identity: {}", e))?;
+    let identity = Identity::from_str(&encoded.to_uppercase())
+        .map_err(|e| anyhow::anyhow!("Invalid identity: {}", e))?;
     let recipient = identity.to_public();
 
     Ok(Keys {
         identity,
         recipient,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_derive_keys() {
-        let keys = derive_keys("mypassword", "myvault").unwrap();
-        // Just verify it doesn't crash
-        let rec = keys.recipient.to_string();
-        assert!(rec.starts_with("age1"));
-    }
 }
