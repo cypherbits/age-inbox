@@ -76,6 +76,29 @@ cargo run --release
 
 The application will listen on HTTP `0.0.0.0:3000` and create a local `vaults` folder. 
 
+## Environment Variables
+
+The server currently supports CORS configuration via environment variables.
+
+- `CORS_ALLOWED_ORIGINS` (optional): Comma-separated list of allowed origins (`https://app.example.com,http://localhost:5173`) or `*`.
+  - If this variable is not set, CORS headers are not added.
+- `CORS_ALLOWED_METHODS` (optional): Comma-separated methods (e.g. `GET,POST,OPTIONS`) or `*`.
+- `CORS_ALLOWED_HEADERS` (optional): Comma-separated request headers allowed in preflight (e.g. `content-type,x-file-origin,x-filename,x-extended-metadata`) or `*`.
+- `CORS_EXPOSE_HEADERS` (optional): Comma-separated response headers exposed to browsers.
+- `CORS_ALLOW_CREDENTIALS` (optional): `true/false` (also accepts `1/0`, `yes/no`, `on/off`).
+- `CORS_MAX_AGE_SECS` (optional): Preflight cache max age in seconds.
+
+Example:
+
+```bash
+CORS_ALLOWED_ORIGINS=http://localhost:4200,https://app.example.com \
+CORS_ALLOWED_METHODS=GET,POST,OPTIONS \
+CORS_ALLOWED_HEADERS=content-type,x-file-origin,x-filename,x-extended-metadata \
+CORS_ALLOW_CREDENTIALS=false \
+CORS_MAX_AGE_SECS=600 \
+cargo run --release
+```
+
 #### Enabling HTTPS
 You can launch the server in HTTPS mode by passing the `--https` flag:
 
