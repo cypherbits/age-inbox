@@ -78,7 +78,7 @@ async fn handle_upload(
         .map_err(|_| make_error(StatusCode::INTERNAL_SERVER_ERROR, "Invalid public key"))?;
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .as_micros();
 
     let filepath = target_dir.join(format!("upload_{}.age", timestamp));

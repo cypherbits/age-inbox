@@ -51,13 +51,14 @@ async fn walk_dir(root: PathBuf) -> Result<Vec<String>, String> {
             }
 
             let path = entry.path();
+            let file_type = entry.file_type().await.map_err(|e| e.to_string())?;
             let relative = if prefix.is_empty() {
                 name
             } else {
                 format!("{}/{}", prefix, name)
             };
 
-            if path.is_dir() {
+            if file_type.is_dir() {
                 stack.push((path, relative));
             } else {
                 all_files.push(relative);

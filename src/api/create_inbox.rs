@@ -1,4 +1,5 @@
 use axum::{extract::State, http::StatusCode, Json};
+use zeroize::Zeroize;
 
 use crate::crypto::derive_keys;
 
@@ -22,7 +23,10 @@ pub(crate) async fn create_inbox(
         return Err(make_error(StatusCode::CONFLICT, "Vault already exists"));
     }
 
-    let keys = derive_keys(&payload.password, &payload.name)
+    let mut password = payload.password;
+    let keys_result = derive_keys(&password, &payload.name);
+    password.zeroize();
+    let keys = keys_result
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     tokio::fs::create_dir_all(&vault_dir)

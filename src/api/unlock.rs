@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use tokio::time::{Duration, Instant};
+use zeroize::Zeroize;
 
 use crate::crypto::derive_keys;
 
@@ -25,7 +26,10 @@ pub(crate) async fn unlock(
 
     let vault_dir = state.vaults_dir.join(&name);
     let config = read_vault_config(&vault_dir).await?;
-    let keys = derive_keys(&payload.password, &name)
+    let mut password = payload.password;
+    let keys_result = derive_keys(&password, &name);
+    password.zeroize();
+    let keys = keys_result
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     if keys.recipient.to_string() != config.public_key {

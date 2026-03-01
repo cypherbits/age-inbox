@@ -74,7 +74,7 @@ pub(crate) async fn download_file(
         .map(|n| n.trim_end_matches(".age"))
         .unwrap_or("file");
 
-    Ok(axum::response::Response::builder()
+    axum::response::Response::builder()
         .status(StatusCode::OK)
         .header(
             header::CONTENT_DISPOSITION,
@@ -82,5 +82,5 @@ pub(crate) async fn download_file(
         )
         .header(header::CONTENT_TYPE, content_type)
         .body(body)
-        .unwrap())
+        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
