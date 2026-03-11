@@ -47,11 +47,16 @@ pub(crate) async fn list_files(
         }
 
         let full_path = state.vaults_dir.join(&name).join(&relative_path);
+        let size = tokio::fs::metadata(&full_path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
         let (filename, origin) = read_metadata_fields(&full_path, &identity).await;
         listed.push(ListedFile {
             path: relative_path,
             filename,
             origin,
+            size,
         });
     }
 
@@ -114,7 +119,7 @@ async fn read_metadata_fields(
     (filename, metadata.origin)
 }
 
-async fn walk_dir(root: PathBuf) -> Result<Vec<String>, String> {
+pub(crate) async fn walk_dir(root: PathBuf) -> Result<Vec<String>, String> {
     let mut all_files = Vec::new();
     let mut stack = vec![(root, String::new())];
 

@@ -120,4 +120,58 @@ async fn metadata_endpoint_returns_json_and_download_rejects_sidecar() {
     let metadata: FileMetadata = metadata_response.json().await.unwrap();
     assert_eq!(metadata.filename, Some("subfile.txt".to_string()));
     assert_eq!(metadata.origin, Some("local".to_string()));
+    assert!(metadata.filesize.is_some(), "Metadata should include filesize");
+    assert!(metadata.filesize.unwrap() > 0, "filesize should be positive");
 }
+
+/// Download endpoint supports HTTP Range header on decrypted content.
+#[tokio::test]
+async fn download_range_returns_partial_content() {
+    let (base_url, _dir) = common::setup_app().await;
+    let client = reqwest::Client::new();
+    common::create_vault(&client, &base_url, true).await;
+
+    let original_content = b"hello world for range test!";
+    let form = reqwest::multipart::Form::new()
+        .text("filename", "rangetest.txt")
+        .part(
+            "file",
+            reqwest::multipart::Part::bytes(original_content.to_vec())
+                .file_name("rangetest.txt"),
+        );
+
+    let upload = client
+        .post(format!("{}/inbox/testvault/upload", base_url))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    common::unlock_vault(&client, &base_url, "mypassword").await;
+
+    let list = client
+        .get(format!("{}/inbox/testvault/list", base_url))
+        .send()
+        .await
+        .unwrap();
+    let files: Vec<ListedFile> = list.json().await.unwrap();
+    let data_file = files
+        .iter()
+        .map(|f| f.path.clone())
+        .find(|f| f.ends_with(".age") && !f.ends_with(".meta.age"))
+        .unwrap();
+
+    // Range request: bytes 0-4 should return "hello"
+    let range_response = client
+        .get(format!("{}/inbox/testvault/download/{}", base_url, data_file))
+        .header("Range", "bytes=0-4")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(range_response.status(), StatusCode::PARTIAL_CONTENT);
+    assert!(range_response.headers().get("content-range").is_some());
+    assert!(range_response.headers().get("accept-ranges").is_some());
+    let partial = range_response.text().await.unwrap();
+    assert_eq!(partial, "hello");
+}

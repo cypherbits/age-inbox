@@ -9,7 +9,9 @@ use tower_http::cors::{Any, CorsLayer};
 mod config;
 mod create_inbox;
 mod download;
+mod download_raw;
 mod list_files;
+mod list_files_raw;
 mod lock;
 mod metadata;
 mod types;
@@ -17,7 +19,7 @@ mod unlock;
 mod upload;
 mod validation;
 
-pub use types::{AppState, CreateInboxRes, FileMetadata, ListedFile};
+pub use types::{AppState, CreateInboxRes, FileMetadata, ListedFile, RawListedFile};
 
 fn env_var(name: &str) -> Option<String> {
     env::var(name)
@@ -116,6 +118,9 @@ pub fn router(state: AppState) -> Router {
         .route("/inbox/:name/list", get(list_files::list_files))
         .route("/inbox/:name/download/*path", get(download::download_file))
         .route("/inbox/:name/metadata/*path", get(metadata::download_metadata))
+        // Raw endpoints (work without vault unlock)
+        .route("/inbox/:name/raw/list", get(list_files_raw::list_files_raw))
+        .route("/inbox/:name/raw/download/*path", get(download_raw::download_raw))
         .with_state(state);
 
     if let Some(cors) = cors_layer_from_env() {

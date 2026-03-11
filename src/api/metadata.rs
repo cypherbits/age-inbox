@@ -86,8 +86,13 @@ pub(crate) async fn download_metadata(
         .await
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let metadata: FileMetadata = serde_json::from_slice(&bytes)
+    let mut metadata: FileMetadata = serde_json::from_slice(&bytes)
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Add the encrypted file size on disk
+    if let Ok(fs_meta) = tokio::fs::metadata(&encrypted_file).await {
+        metadata.filesize = Some(fs_meta.len());
+    }
 
     Ok(Json(metadata))
 }

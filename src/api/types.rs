@@ -54,6 +54,8 @@ pub struct UnlockReq {
 pub struct FileMetadata {
     pub filename: Option<String>,
     pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filesize: Option<u64>,
     #[serde(flatten)]
     pub extended: HashMap<String, serde_json::Value>,
 }
@@ -63,4 +65,11 @@ pub struct ListedFile {
     pub path: String,
     pub filename: Option<String>,
     pub origin: Option<String>,
+    pub size: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct RawListedFile {
+    pub path: String,
+    pub size: u64,
 }
