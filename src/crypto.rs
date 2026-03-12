@@ -27,9 +27,10 @@ pub fn derive_keys(password: &str, vault_name: &str) -> Result<Keys> {
         .hash_password_into(password.as_bytes(), &salt_bytes, &mut key_bytes)
         .map_err(|e| anyhow::anyhow!("Argon2 error: {}", e))?;
 
-    use bech32::{ToBase32, Variant};
+    let hrp = bech32::Hrp::parse("AGE-SECRET-KEY-")
+        .map_err(|e| anyhow::anyhow!("Bech32 HRP error: {}", e))?;
     let encoded = Zeroizing::new(
-        bech32::encode("AGE-SECRET-KEY-", key_bytes.to_base32(), Variant::Bech32)
+        bech32::encode::<bech32::Bech32>(hrp, &key_bytes)
             .map_err(|e| anyhow::anyhow!("Bech32 encode error: {}", e))?,
     );
 
