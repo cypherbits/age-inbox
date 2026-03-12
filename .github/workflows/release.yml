@@ -3,7 +3,7 @@ name: Create Release and Publish Docker Image
 on:
   push:
     branches:
-      - master
+      - main
   workflow_dispatch:
     inputs:
       version:
@@ -13,7 +13,7 @@ on:
       target_ref:
         description: "Rama o commit para ejecutar el release manual"
         required: false
-        default: "master"
+        default: "main"
         type: string
 
 jobs:
@@ -68,7 +68,7 @@ jobs:
       - name: Extract metadata (tags, labels) for Docker
         if: ${{ steps.resolve_tag.outputs.tag != '' }}
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
