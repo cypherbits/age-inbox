@@ -30,6 +30,10 @@ For a fully interactive schema, explore the OpenAPI 3 specification located in `
   - `POST /inbox/{name}/lock`
   - *Purges the private key early from in-memory state.*
 
+- **Get Vault Configuration**
+  - `GET /inbox/{name}/config`
+  - *Returns the vault's public configuration including `allow_subfolders` and permission settings.*
+
 ## Unlocked Vault Operations (require unlock)
 
 - **List Files**

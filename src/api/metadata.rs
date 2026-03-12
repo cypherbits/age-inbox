@@ -9,7 +9,8 @@ use tokio::time::Instant;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
 use super::{
-    types::{make_error, ApiError, AppState, FileMetadata},
+    config::read_vault_config,
+    types::{make_error, ApiError, AppState, FileMetadata, permission_denied},
     validation::{is_valid_name, is_valid_subpath},
 };
 
@@ -39,6 +40,14 @@ pub(crate) async fn download_metadata(
         ));
     }
 
+    let vault_dir = state.vaults_dir.join(&name);
+
+    // Check metadata permission
+    let config = read_vault_config(&vault_dir).await?;
+    if !config.permissions.allow_metadata {
+        return Err(permission_denied());
+    }
+
     let identity = {
         let mut vaults = state.unlocked_vaults.write().await;
         if let Some(vault) = vaults.get(&name) {
@@ -52,7 +61,7 @@ pub(crate) async fn download_metadata(
         }
     };
 
-    let encrypted_file = state.vaults_dir.join(&name).join(&path);
+    let encrypted_file = vault_dir.join(&path);
     let metadata_file = metadata_sidecar(&encrypted_file)
         .ok_or_else(|| make_error(StatusCode::BAD_REQUEST, "Invalid encrypted file path"))?;
 

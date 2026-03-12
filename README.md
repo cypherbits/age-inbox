@@ -27,6 +27,78 @@ Detailed endpoint definitions are available in `docs/API.md`.
 
 For a fully interactive schema, explore the OpenAPI 3 specification in `docs/openapi.yaml`.
 
+## Vault Configuration
+
+Each vault is stored as a directory with a `.inbox-age.config` file that defines its settings. This file is created automatically when a new vault is created via the API.
+
+### Configuration File Format
+
+The `.inbox-age.config` file is a simple text-based format:
+
+```
+inbox-name: my-vault
+public-key: <x25519-public-key>
+allow-subfolders: true
+permissions: {"allow_upload":true,"allow_download":true,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
+```
+
+### Configuration Options
+
+#### `allow_subfolders`
+- **Type:** `boolean` (default: `false`)
+- **Description:** Controls whether files can be uploaded to subdirectories within the vault or only to the root level.
+- **Set during vault creation:** `POST /inbox` with `"allow_subfolders": true` parameter.
+
+#### Permissions Object
+Granular control over API operations. All permissions are `boolean` (default: `true` for all).
+
+| Permission | Endpoint | Description |
+|-----------|----------|-------------|
+| `allow_upload` | `POST /inbox/{name}/upload/*` | Controls file uploads to the vault. |
+| `allow_download` | `GET /inbox/{name}/download/*` | Controls downloading and decrypting files (requires vault unlock). |
+| `allow_list` | `GET /inbox/{name}/list` & `GET /inbox/{name}/raw/list` | Controls listing files in the vault. |
+| `allow_delete` | `DELETE /inbox/{name}/delete/*` & `DELETE /inbox/{name}/raw/delete/*` | Controls file deletion. |
+| `allow_metadata` | `GET /inbox/{name}/metadata/*` | Controls access to decrypted file metadata. |
+| `allow_lock_unlock` | `POST /inbox/{name}/unlock` & `POST /inbox/{name}/lock` | Controls vault unlock/lock operations. |
+
+### Viewing Vault Configuration
+
+You can query the current configuration of a vault (without authentication) using:
+
+```bash
+curl http://localhost:3000/inbox/my-vault/config
+```
+
+**Response:**
+```json
+{
+  "allow_subfolders": true,
+  "permissions": {
+    "allow_upload": true,
+    "allow_download": true,
+    "allow_list": true,
+    "allow_delete": true,
+    "allow_metadata": true,
+    "allow_lock_unlock": true
+  }
+}
+```
+
+### Default Behavior
+
+When a vault is created, all permissions are enabled by default (`true`). This provides full access to all API operations.
+
+To restrict access to specific operations, the `.inbox-age.config` file would need to be manually edited on the filesystem (since there is no API endpoint to modify permissions). For example, to disable downloads:
+
+```
+inbox-name: my-vault
+public-key: <x25519-public-key>
+allow-subfolders: true
+permissions: {"allow_upload":true,"allow_download":false,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
+```
+
+After modifying the file, the changes take effect immediately on the next API request to that vault.
+
 ## Deployment
 
 The repository includes a complete `Dockerfile` and `docker-compose.yml` to set up the inbox service with an externally mounted volume for the vaults.

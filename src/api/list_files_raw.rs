@@ -5,8 +5,9 @@ use axum::{
 };
 
 use super::{
+    config::read_vault_config,
     list_files::walk_dir,
-    types::{make_error, ApiError, AppState, RawListedFile},
+    types::{make_error, ApiError, AppState, RawListedFile, permission_denied},
     validation::is_valid_name,
 };
 
@@ -22,6 +23,12 @@ pub(crate) async fn list_files_raw(
     let vault_dir = state.vaults_dir.join(&name);
     if !vault_dir.exists() {
         return Err(make_error(StatusCode::NOT_FOUND, "Vault not found"));
+    }
+
+    // Check list permission
+    let config = read_vault_config(&vault_dir).await?;
+    if !config.permissions.allow_list {
+        return Err(permission_denied());
     }
 
     let files = walk_dir(vault_dir)

@@ -4,7 +4,8 @@ use axum::{
 };
 
 use super::{
-    types::{make_error, ApiError, AppState},
+    config::read_vault_config,
+    types::{make_error, ApiError, AppState, permission_denied},
     validation::{is_valid_name, is_valid_subpath},
 };
 
@@ -31,6 +32,12 @@ pub(crate) async fn delete_file(
     let vault_dir = state.vaults_dir.join(&name);
     if !vault_dir.exists() {
         return Err(make_error(StatusCode::NOT_FOUND, "Vault not found"));
+    }
+
+    // Check delete permission
+    let config = read_vault_config(&vault_dir).await?;
+    if !config.permissions.allow_delete {
+        return Err(permission_denied());
     }
 
     // Check if vault is unlocked

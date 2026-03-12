@@ -20,6 +20,7 @@ mod types;
 mod unlock;
 mod upload;
 mod validation;
+mod vault_config;
 
 pub use types::{AppState, CreateInboxRes, FileMetadata, ListedFile, RawListedFile};
 
@@ -113,6 +114,7 @@ fn cors_layer_from_env() -> Option<CorsLayer> {
 pub fn router(state: AppState) -> Router {
     let router = Router::new()
         .route("/inbox", post(create_inbox::create_inbox))
+        .route("/inbox/{name}/config", get(vault_config::get_vault_config))
         .route("/inbox/{name}/upload", post(upload::upload_root))
         .route("/inbox/{name}/upload/{*path}", post(upload::upload_path))
         .route("/inbox/{name}/unlock", post(unlock::unlock))
