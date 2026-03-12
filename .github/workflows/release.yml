@@ -1,0 +1,69 @@
+name: Create Release and Publish Docker Image
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create tags and releases
+      packages: write # Needed to publish to GHCR
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Needed for changelog generation and tags
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: false # Do not bump if no feat/fix/breaking commits are found
+
+      - name: Create a GitHub release
+        if: ${{ steps.tag_version.outputs.new_tag != '' }}
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to the Container registry
+        if: ${{ steps.tag_version.outputs.new_tag != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        if: ${{ steps.tag_version.outputs.new_tag != '' }}
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.tag_version.outputs.new_tag }}
+
+      - name: Set up Docker Buildx
+        if: ${{ steps.tag_version.outputs.new_tag != '' }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        if: ${{ steps.tag_version.outputs.new_tag != '' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
