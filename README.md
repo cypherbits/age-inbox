@@ -1,5 +1,7 @@
 # Age Inbox Service
 
+*Vibe coded (yes, it is vibe coded, but it should be ok)*
+
 A secure, RESTful inbox service written in Rust that allows users to create password-protected encrypted vaults and stream file uploads securely directly to disk.
 
 ## Overview
