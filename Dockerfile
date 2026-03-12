@@ -4,8 +4,9 @@ WORKDIR /usr/src/app
 
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
+COPY tests ./tests
 
-RUN cargo build --release
+RUN cargo test --locked && cargo build --release --locked
 
 FROM debian:trixie-slim
 

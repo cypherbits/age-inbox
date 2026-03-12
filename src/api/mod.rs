@@ -111,16 +111,16 @@ fn cors_layer_from_env() -> Option<CorsLayer> {
 pub fn router(state: AppState) -> Router {
     let router = Router::new()
         .route("/inbox", post(create_inbox::create_inbox))
-        .route("/inbox/:name/upload", post(upload::upload_root))
-        .route("/inbox/:name/upload/*path", post(upload::upload_path))
-        .route("/inbox/:name/unlock", post(unlock::unlock))
-        .route("/inbox/:name/lock", post(lock::lock))
-        .route("/inbox/:name/list", get(list_files::list_files))
-        .route("/inbox/:name/download/*path", get(download::download_file))
-        .route("/inbox/:name/metadata/*path", get(metadata::download_metadata))
+        .route("/inbox/{name}/upload", post(upload::upload_root))
+        .route("/inbox/{name}/upload/{*path}", post(upload::upload_path))
+        .route("/inbox/{name}/unlock", post(unlock::unlock))
+        .route("/inbox/{name}/lock", post(lock::lock))
+        .route("/inbox/{name}/list", get(list_files::list_files))
+        .route("/inbox/{name}/download/{*path}", get(download::download_file))
+        .route("/inbox/{name}/metadata/{*path}", get(metadata::download_metadata))
         // Raw endpoints (work without vault unlock)
-        .route("/inbox/:name/raw/list", get(list_files_raw::list_files_raw))
-        .route("/inbox/:name/raw/download/*path", get(download_raw::download_raw))
+        .route("/inbox/{name}/raw/list", get(list_files_raw::list_files_raw))
+        .route("/inbox/{name}/raw/download/{*path}", get(download_raw::download_raw))
         .with_state(state);
 
     if let Some(cors) = cors_layer_from_env() {
