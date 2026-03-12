@@ -23,63 +23,9 @@ The **Age Inbox Service** is designed as a drop-off encrypted inbox. It utilizes
 
 ## Endpoints
 
-For a fully interactive schema, explore the OpenAPI 3 specification located in `docs/openapi.yaml`. 
+Detailed endpoint definitions are available in `docs/API.md`.
 
-### Vault Management
-
-- **Create Inbox**
-  - `POST /inbox`
-  - Body: `{"name": "myvault", "password": "super-secret", "allow_subfolders": false}`
-  - *Generates a new `.inbox-age.config` with the vault's derived public footprint.*
-
-- **Upload File (Vault Root)**
-  - `POST /inbox/{name}/upload`
-  - Body: Raw binary stream (`application/octet-stream`) OR `multipart/form-data` with a `file` field.
-  - Metadata (`filename`, `origin`, `extended`) must be sent as multipart fields, not HTTP headers.
-  - *Streams the upload through X25519 encryption and saves `.age` and `.meta.age` files.*
-
-- **Upload File (Subfolder)**
-  - `POST /inbox/{name}/upload/{path}`
-  - Body: Raw binary stream (`application/octet-stream`) OR `multipart/form-data` with a `file` field.
-  - Metadata (`filename`, `origin`, `extended`) must be sent as multipart fields, not HTTP headers.
-  - *Stores encrypted files in a nested path when `allow_subfolders` is enabled.*
-
-- **Unlock Vault**
-  - `POST /inbox/{name}/unlock`
-  - Body: `{"password": "super-secret"}`
-  - *Derives the private vault key and temporarily caches it in memory (1 hr expiration).*
-
-- **Lock Vault**
-  - `POST /inbox/{name}/lock`
-  - *Purges the private key early from in-memory state.*
-
-### Unlocked Vault Operations (require unlock)
-
-- **List Files**
-  - `GET /inbox/{name}/list`
-  - *Lists encrypted files (excluding `.meta.age`) with decrypted metadata (`filename`, `origin`) and encrypted file `size` in bytes.*
-
-- **Download File (Decrypted)**
-  - `GET /inbox/{name}/download/{path}`
-  - Supports HTTP `Range` header for partial content (`206 Partial Content`).
-  - *Decrypts and streams the file content. Returns `Accept-Ranges: bytes`.* 
-
-- **Get File Metadata**
-  - `GET /inbox/{name}/metadata/{path}`
-  - *Returns decrypted metadata JSON including the encrypted file `filesize` on disk.*
-
-### Raw Operations (no unlock required)
-
-These endpoints work regardless of whether the vault is locked or unlocked. They serve encrypted `.age` files without decryption.
-
-- **Raw List Files**
-  - `GET /inbox/{name}/raw/list`
-  - *Lists encrypted files with `path` and `size` (no metadata decryption).*
-
-- **Raw Download File (Encrypted)**
-  - `GET /inbox/{name}/raw/download/{path}`
-  - Supports HTTP `Range` header for efficient partial content (`206 Partial Content`).
-  - *Streams the encrypted `.age` file as-is with `Content-Length` and `Accept-Ranges: bytes`.*
+For a fully interactive schema, explore the OpenAPI 3 specification in `docs/openapi.yaml`.
 
 ## Deployment
 
@@ -102,6 +48,13 @@ services:
   age-inbox:
     image: ghcr.io/cypherbits/age-inbox:latest
     container_name: age-inbox
+    environment:
+      - CORS_ALLOWED_ORIGINS=http://localhost:4200,https://app.example.com
+      - CORS_ALLOWED_METHODS=GET,POST,OPTIONS
+      - CORS_ALLOWED_HEADERS=content-type,x-file-origin,x-filename,x-extended-metadata
+      - CORS_ALLOW_CREDENTIALS=false
+      - CORS_MAX_AGE_SECS=600
+      - RUST_LOG=info
     ports:
       - "3000:3000"
     volumes:
@@ -127,7 +80,7 @@ The application will listen on HTTP `0.0.0.0:3000` and create a local `vaults` f
 
 ## Environment Variables
 
-The server currently supports CORS configuration via environment variables.
+The server supports CORS and logging configuration via environment variables.
 
 - `CORS_ALLOWED_ORIGINS` (optional): Comma-separated list of allowed origins (`https://app.example.com,http://localhost:5173`) or `*`.
   - If this variable is not set, CORS headers are not added.
@@ -136,6 +89,7 @@ The server currently supports CORS configuration via environment variables.
 - `CORS_EXPOSE_HEADERS` (optional): Comma-separated response headers exposed to browsers.
 - `CORS_ALLOW_CREDENTIALS` (optional): `true/false` (also accepts `1/0`, `yes/no`, `on/off`).
 - `CORS_MAX_AGE_SECS` (optional): Preflight cache max age in seconds.
+- `RUST_LOG` (optional): Log filter for `tracing` output. Common values: `error`, `warn`, `info`, `debug`, `trace`. You can also use per-module filters, e.g. `age_inbox=debug,tower_http=info`.
 
 Example:
 
@@ -145,6 +99,7 @@ CORS_ALLOWED_METHODS=GET,POST,OPTIONS \
 CORS_ALLOWED_HEADERS=content-type,x-file-origin,x-filename,x-extended-metadata \
 CORS_ALLOW_CREDENTIALS=false \
 CORS_MAX_AGE_SECS=600 \
+RUST_LOG=info \
 cargo run --release
 ```
 

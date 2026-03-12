@@ -90,9 +90,9 @@ async fn read_metadata_fields(
     let Ok(decryptor) = Decryptor::new_async(meta_file.compat()).await else {
         return (None, None);
     };
-    let Decryptor::Recipients(decryptor) = decryptor else {
+    if decryptor.is_scrypt() {
         return (None, None);
-    };
+    }
 
     let Ok(async_reader) = decryptor.decrypt_async(std::iter::once(identity as &dyn age::Identity))
     else {

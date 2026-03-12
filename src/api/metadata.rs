@@ -65,13 +65,13 @@ pub(crate) async fn download_metadata(
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let decryptor = match Decryptor::new_async(fs_file.compat()).await {
-        Ok(Decryptor::Recipients(d)) => d,
-        Ok(_) => {
+        Ok(d) if d.is_scrypt() => {
             return Err(make_error(
                 StatusCode::BAD_REQUEST,
                 "Passphrase encryption not supported",
             ))
         }
+        Ok(d) => d,
         Err(e) => return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     };
 

@@ -57,9 +57,35 @@ jobs:
             TAG="v$VERSION"
           else
             TAG="$AUTO_TAG"
+            VERSION="${TAG#v}"
           fi
 
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Sync Cargo version
+        if: ${{ steps.resolve_tag.outputs.tag != '' }}
+        env:
+          RELEASE_VERSION: ${{ steps.resolve_tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          version = "${{ steps.resolve_tag.outputs.version }}"
+          cargo_toml = Path("Cargo.toml")
+          content = cargo_toml.read_text(encoding="utf-8")
+          updated, count = re.subn(
+              r'(?m)^version\s*=\s*"[^"]+"\s*$',
+              f'version = "{version}"',
+              content,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("Could not update [package].version in Cargo.toml")
+          cargo_toml.write_text(updated, encoding="utf-8")
+          PY
 
       - name: Set up Docker Buildx
         if: ${{ steps.resolve_tag.outputs.tag != '' }}
