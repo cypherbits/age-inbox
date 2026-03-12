@@ -45,6 +45,10 @@ For a fully interactive schema, explore the OpenAPI 3 specification located in `
   - `GET /inbox/{name}/metadata/{path}`
   - *Returns decrypted metadata JSON including the encrypted file `filesize` on disk.*
 
+- **Delete File (Decrypted)**
+  - `DELETE /inbox/{name}/delete/{path}`
+  - *Deletes the file and its associated metadata (if exists). Requires vault to be unlocked.*
+
 ## Raw Operations (no unlock required)
 
 These endpoints work regardless of whether the vault is locked or unlocked. They serve encrypted `.age` files without decryption.
@@ -57,4 +61,8 @@ These endpoints work regardless of whether the vault is locked or unlocked. They
   - `GET /inbox/{name}/raw/download/{path}`
   - Supports HTTP `Range` header for efficient partial content (`206 Partial Content`).
   - *Streams the encrypted `.age` file as-is with `Content-Length` and `Accept-Ranges: bytes`.*
+
+- **Raw Delete File (Encrypted)**
+  - `DELETE /inbox/{name}/raw/delete/{path}`
+  - *Deletes the encrypted file and its associated metadata (if exists). Works regardless of vault lock state.*
 
