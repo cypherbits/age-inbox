@@ -6,6 +6,7 @@ use super::types::{make_error, ApiError};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VaultPermissions {
+    pub allow_subfolders: bool,
     pub allow_upload: bool,
     pub allow_download: bool,
     pub allow_list: bool,
@@ -17,6 +18,7 @@ pub struct VaultPermissions {
 impl Default for VaultPermissions {
     fn default() -> Self {
         VaultPermissions {
+            allow_subfolders: false,
             allow_upload: true,
             allow_download: true,
             allow_list: true,
@@ -29,7 +31,6 @@ impl Default for VaultPermissions {
 
 pub(crate) struct VaultConfig {
     pub public_key: String,
-    pub allow_subfolders: bool,
     pub permissions: VaultPermissions,
 }
 
@@ -41,14 +42,11 @@ pub(crate) async fn read_vault_config(vault_dir: &Path) -> Result<VaultConfig, A
         .map_err(|_| make_error(StatusCode::NOT_FOUND, "Vault config missing"))?;
 
     let mut public_key = String::new();
-    let mut allow_subfolders = false;
     let mut permissions = VaultPermissions::default();
 
     for line in content.lines() {
         if line.starts_with("public-key: ") {
             public_key = line.trim_start_matches("public-key: ").to_string();
-        } else if line.starts_with("allow-subfolders: ") {
-            allow_subfolders = line.contains("true");
         } else if line.starts_with("permissions: ") {
             let perm_json = line.trim_start_matches("permissions: ");
             if let Ok(perms) = serde_json::from_str::<VaultPermissions>(perm_json) {
@@ -66,7 +64,6 @@ pub(crate) async fn read_vault_config(vault_dir: &Path) -> Result<VaultConfig, A
 
     Ok(VaultConfig {
         public_key,
-        allow_subfolders,
         permissions,
     })
 }
@@ -79,14 +76,15 @@ pub(crate) async fn write_vault_config(
     allow_subfolders: bool,
 ) -> Result<(), ApiError> {
     let config_path = vault_dir.join(".inbox-age.config");
-    let allow_subfolders_str = if allow_subfolders { "true" } else { "false" };
-    let permissions = VaultPermissions::default();
+    let mut permissions = VaultPermissions::default();
+    permissions.allow_subfolders = allow_subfolders;
+
     let permissions_json = serde_json::to_string(&permissions)
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let config_content = format!(
-        "inbox-name: {}\npublic-key: {}\nallow-subfolders: {}\npermissions: {}\n",
-        inbox_name, public_key, allow_subfolders_str, permissions_json
+        "inbox-name: {}\npublic-key: {}\npermissions: {}\n",
+        inbox_name, public_key, permissions_json
     );
 
     tokio::fs::write(config_path, config_content)

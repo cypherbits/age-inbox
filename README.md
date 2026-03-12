@@ -38,28 +38,23 @@ The `.inbox-age.config` file is a simple text-based format:
 ```
 inbox-name: my-vault
 public-key: <x25519-public-key>
-allow-subfolders: true
-permissions: {"allow_upload":true,"allow_download":true,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
+permissions: {"allow_subfolders":false,"allow_upload":true,"allow_download":true,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
 ```
 
 ### Configuration Options
 
-#### `allow_subfolders`
-- **Type:** `boolean` (default: `false`)
-- **Description:** Controls whether files can be uploaded to subdirectories within the vault or only to the root level.
-- **Set during vault creation:** `POST /inbox` with `"allow_subfolders": true` parameter.
-
 #### Permissions Object
-Granular control over API operations. All permissions are `boolean` (default: `true` for all).
+Granular control over vault settings and API operations. All permissions are `boolean` (default values shown below).
 
-| Permission | Endpoint | Description |
-|-----------|----------|-------------|
-| `allow_upload` | `POST /inbox/{name}/upload/*` | Controls file uploads to the vault. |
-| `allow_download` | `GET /inbox/{name}/download/*` | Controls downloading and decrypting files (requires vault unlock). |
-| `allow_list` | `GET /inbox/{name}/list` & `GET /inbox/{name}/raw/list` | Controls listing files in the vault. |
-| `allow_delete` | `DELETE /inbox/{name}/delete/*` & `DELETE /inbox/{name}/raw/delete/*` | Controls file deletion. |
-| `allow_metadata` | `GET /inbox/{name}/metadata/*` | Controls access to decrypted file metadata. |
-| `allow_lock_unlock` | `POST /inbox/{name}/unlock` & `POST /inbox/{name}/lock` | Controls vault unlock/lock operations. |
+| Permission | Default | Endpoint(s) | Description |
+|-----------|---------|----------|-------------|
+| `allow_subfolders` | `false` | `POST /inbox/{name}/upload/{*path}` | Controls whether files can be uploaded to subdirectories. Set to `true` to allow subfolder uploads. |
+| `allow_upload` | `true` | `POST /inbox/{name}/upload/*` | Controls file uploads to the vault. |
+| `allow_download` | `true` | `GET /inbox/{name}/download/*` | Controls downloading and decrypting files (requires vault unlock). |
+| `allow_list` | `true` | `GET /inbox/{name}/list` & `GET /inbox/{name}/raw/list` | Controls listing files in the vault. |
+| `allow_delete` | `true` | `DELETE /inbox/{name}/delete/*` & `DELETE /inbox/{name}/raw/delete/*` | Controls file deletion. |
+| `allow_metadata` | `true` | `GET /inbox/{name}/metadata/*` | Controls access to decrypted file metadata. |
+| `allow_lock_unlock` | `true` | `POST /inbox/{name}/unlock` & `POST /inbox/{name}/lock` | Controls vault unlock/lock operations. |
 
 ### Viewing Vault Configuration
 
@@ -72,8 +67,8 @@ curl http://localhost:3000/inbox/my-vault/config
 **Response:**
 ```json
 {
-  "allow_subfolders": true,
   "permissions": {
+    "allow_subfolders": false,
     "allow_upload": true,
     "allow_download": true,
     "allow_list": true,
@@ -86,15 +81,14 @@ curl http://localhost:3000/inbox/my-vault/config
 
 ### Default Behavior
 
-When a vault is created, all permissions are enabled by default (`true`). This provides full access to all API operations.
+When a vault is created, all permissions are enabled by default (`true` for operations, `false` for `allow_subfolders`). This provides full access to all API operations while restricting uploads to the vault root.
 
-To restrict access to specific operations, the `.inbox-age.config` file would need to be manually edited on the filesystem (since there is no API endpoint to modify permissions). For example, to disable downloads:
+To customize permissions, the `.inbox-age.config` file would need to be manually edited on the filesystem. For example, to disable downloads while allowing subfolders:
 
 ```
 inbox-name: my-vault
 public-key: <x25519-public-key>
-allow-subfolders: true
-permissions: {"allow_upload":true,"allow_download":false,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
+permissions: {"allow_subfolders":true,"allow_upload":true,"allow_download":false,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
 ```
 
 After modifying the file, the changes take effect immediately on the next API request to that vault.

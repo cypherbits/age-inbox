@@ -8,7 +8,6 @@ use super::{
 
 #[derive(serde::Serialize)]
 pub struct VaultConfigRes {
-    pub allow_subfolders: bool,
     pub permissions: serde_json::Value,
 }
 
@@ -29,7 +28,6 @@ pub(crate) async fn get_vault_config(
     let config = read_vault_config(&vault_dir).await?;
 
     Ok(Json(VaultConfigRes {
-        allow_subfolders: config.allow_subfolders,
         permissions: serde_json::to_value(&config.permissions)
             .unwrap_or(serde_json::json!({})),
     }))

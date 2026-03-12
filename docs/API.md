@@ -19,7 +19,7 @@ For a fully interactive schema, explore the OpenAPI 3 specification located in `
   - `POST /inbox/{name}/upload/{path}`
   - Body: Raw binary stream (`application/octet-stream`) OR `multipart/form-data` with a `file` field.
   - Metadata (`filename`, `origin`, `extended`) must be sent as multipart fields, not HTTP headers.
-  - *Stores encrypted files in a nested path when `allow_subfolders` is enabled.*
+  - *Stores encrypted files in a nested path when the `allow_subfolders` permission is enabled.*
 
 - **Unlock Vault**
   - `POST /inbox/{name}/unlock`
@@ -32,7 +32,7 @@ For a fully interactive schema, explore the OpenAPI 3 specification located in `
 
 - **Get Vault Configuration**
   - `GET /inbox/{name}/config`
-  - *Returns the vault's public configuration including `allow_subfolders` and permission settings.*
+  - *Returns the vault's public configuration including all permission settings.*
 
 ## Unlocked Vault Operations (require unlock)
 

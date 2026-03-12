@@ -61,7 +61,7 @@ async fn handle_upload(
     let mut target_dir = vault_dir.clone();
 
     if let Some(ref p) = subpath {
-        if !config.allow_subfolders {
+        if !config.permissions.allow_subfolders {
             return Err(make_error(
                 StatusCode::FORBIDDEN,
                 "Subfolders not allowed by vault config",
