@@ -10,7 +10,8 @@ use tokio::time::Instant;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
 use super::{
-    types::{make_error, ApiError, AppState, FileMetadata, ListedFile},
+    config::read_vault_config,
+    types::{make_error, ApiError, AppState, FileMetadata, ListedFile, permission_denied},
     validation::is_valid_name,
 };
 
@@ -21,6 +22,13 @@ pub(crate) async fn list_files(
 ) -> Result<Json<Vec<ListedFile>>, ApiError> {
     if !is_valid_name(&name) {
         return Err(make_error(StatusCode::BAD_REQUEST, "Invalid vault name"));
+    }
+
+    // Check list permission
+    let vault_dir = state.vaults_dir.join(&name);
+    let config = read_vault_config(&vault_dir).await?;
+    if !config.permissions.allow_list {
+        return Err(permission_denied());
     }
 
     let identity = {
@@ -34,8 +42,6 @@ pub(crate) async fn list_files(
             return Err(make_error(StatusCode::UNAUTHORIZED, "Vault is locked"));
         }
     };
-
-    let vault_dir = state.vaults_dir.join(&name);
     let files = walk_dir(vault_dir)
         .await
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;

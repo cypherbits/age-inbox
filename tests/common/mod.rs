@@ -53,3 +53,14 @@ pub async fn unlock_vault(client: &reqwest::Client, base_url: &str, password: &s
 
     assert_eq!(response.status(), axum::http::StatusCode::OK);
 }
+
+/// Locks the default test vault.
+pub async fn lock_vault(client: &reqwest::Client, base_url: &str) {
+    let response = client
+        .post(format!("{}/inbox/testvault/lock", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+}

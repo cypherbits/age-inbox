@@ -115,3 +115,69 @@ Upon the first startup with `--https`, it will automatically generate a self-sig
 ### Certificate Pinning
 
 Since the API generates a steady `cert.pem` on its first run (and uses it for all subsequent runs), you can implement **Certificate Pinning** on your clients. Pinning the exact public key or certificate hash of this `cert.pem` protects against Man-in-the-Middle (MITM) attacks.
+
+## Vault Configuration
+
+Each vault is stored as a directory with a `.inbox-age.config` file that defines its settings. This file is created automatically when a new vault is created via the API.
+
+### Configuration File Format
+
+The `.inbox-age.config` file is a simple text-based format:
+
+```
+inbox-name: my-vault
+public-key: <x25519-public-key>
+permissions: {"allow_subfolders":false,"allow_upload":true,"allow_download":true,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
+```
+
+### Configuration Options
+
+#### Permissions Object
+Granular control over vault settings and API operations. All permissions are `boolean` (default values shown below).
+
+| Permission | Default | Endpoint(s) | Description |
+|-----------|---------|----------|-------------|
+| `allow_subfolders` | `false` | `POST /inbox/{name}/upload/{*path}` | Controls whether files can be uploaded to subdirectories. Set to `true` to allow subfolder uploads. |
+| `allow_upload` | `true` | `POST /inbox/{name}/upload/*` | Controls file uploads to the vault. |
+| `allow_download` | `true` | `GET /inbox/{name}/download/*` | Controls downloading and decrypting files (requires vault unlock). |
+| `allow_list` | `true` | `GET /inbox/{name}/list` & `GET /inbox/{name}/raw/list` | Controls listing files in the vault. |
+| `allow_delete` | `true` | `DELETE /inbox/{name}/delete/*` & `DELETE /inbox/{name}/raw/delete/*` | Controls file deletion. |
+| `allow_metadata` | `true` | `GET /inbox/{name}/metadata/*` | Controls access to decrypted file metadata. |
+| `allow_lock_unlock` | `true` | `POST /inbox/{name}/unlock` & `POST /inbox/{name}/lock` | Controls vault unlock/lock operations. |
+
+### Viewing Vault Configuration
+
+You can query the current configuration of a vault (without authentication) using:
+
+```bash
+curl http://localhost:3000/inbox/my-vault/config
+```
+
+**Response:**
+```json
+{
+  "permissions": {
+    "allow_subfolders": false,
+    "allow_upload": true,
+    "allow_download": true,
+    "allow_list": true,
+    "allow_delete": true,
+    "allow_metadata": true,
+    "allow_lock_unlock": true
+  }
+}
+```
+
+### Default Behavior
+
+When a vault is created, all permissions are enabled by default (`true` for operations, `false` for `allow_subfolders`). This provides full access to all API operations while restricting uploads to the vault root.
+
+To customize permissions, the `.inbox-age.config` file would need to be manually edited on the filesystem. For example, to disable downloads while allowing subfolders:
+
+```
+inbox-name: my-vault
+public-key: <x25519-public-key>
+permissions: {"allow_subfolders":true,"allow_upload":true,"allow_download":false,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
+```
+
+After modifying the file, the changes take effect immediately on the next API request to that vault.

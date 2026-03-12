@@ -10,7 +10,8 @@ use tokio::time::Instant;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
 use super::{
-    types::{make_error, ApiError, AppState, FileMetadata},
+    config::read_vault_config,
+    types::{make_error, ApiError, AppState, FileMetadata, permission_denied},
     validation::{is_valid_name, is_valid_subpath},
 };
 
@@ -105,6 +106,14 @@ pub(crate) async fn download_file(
             StatusCode::BAD_REQUEST,
             "Path must point to an encrypted file (.age). Use /metadata for metadata.",
         ));
+    }
+
+    let vault_dir = state.vaults_dir.join(&name);
+
+    // Check download permission
+    let config = read_vault_config(&vault_dir).await?;
+    if !config.permissions.allow_download {
+        return Err(permission_denied());
     }
 
     let identity = {

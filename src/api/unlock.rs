@@ -10,7 +10,7 @@ use crate::crypto::derive_keys;
 
 use super::{
     config::read_vault_config,
-    types::{make_error, ApiError, AppState, GenericRes, UnlockReq, UnlockedVault},
+    types::{make_error, ApiError, AppState, GenericRes, UnlockReq, UnlockedVault, permission_denied},
     validation::is_valid_name,
 };
 
@@ -26,6 +26,12 @@ pub(crate) async fn unlock(
 
     let vault_dir = state.vaults_dir.join(&name);
     let config = read_vault_config(&vault_dir).await?;
+
+    // Check lock_unlock permission
+    if !config.permissions.allow_lock_unlock {
+        return Err(permission_denied());
+    }
+
     let mut password = payload.password;
     let keys_result = derive_keys(&password, &name);
     password.zeroize();

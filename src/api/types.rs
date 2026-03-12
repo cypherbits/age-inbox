@@ -73,3 +73,8 @@ pub struct RawListedFile {
     pub path: String,
     pub size: u64,
 }
+
+pub fn permission_denied() -> ApiError {
+    make_error(StatusCode::FORBIDDEN, "Permission denied for this operation")
+}
+

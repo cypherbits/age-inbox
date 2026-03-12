@@ -14,7 +14,7 @@ use tokio_util::compat::TokioAsyncWriteCompatExt;
 
 use super::{
     config::read_vault_config,
-    types::{make_error, ApiError, AppState, FileMetadata, GenericRes},
+    types::{make_error, ApiError, AppState, FileMetadata, GenericRes, permission_denied},
     validation::{is_valid_name, is_valid_subpath},
 };
 
@@ -52,10 +52,16 @@ async fn handle_upload(
     }
 
     let config = read_vault_config(&vault_dir).await?;
+
+    // Check upload permission
+    if !config.permissions.allow_upload {
+        return Err(permission_denied());
+    }
+
     let mut target_dir = vault_dir.clone();
 
     if let Some(ref p) = subpath {
-        if !config.allow_subfolders {
+        if !config.permissions.allow_subfolders {
             return Err(make_error(
                 StatusCode::FORBIDDEN,
                 "Subfolders not allowed by vault config",

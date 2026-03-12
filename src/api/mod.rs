@@ -8,6 +8,8 @@ use tower_http::cors::{Any, CorsLayer};
 
 mod config;
 mod create_inbox;
+mod delete;
+mod delete_raw;
 mod download;
 mod download_raw;
 mod list_files;
@@ -18,6 +20,7 @@ mod types;
 mod unlock;
 mod upload;
 mod validation;
+mod vault_config;
 
 pub use types::{AppState, CreateInboxRes, FileMetadata, ListedFile, RawListedFile};
 
@@ -111,6 +114,7 @@ fn cors_layer_from_env() -> Option<CorsLayer> {
 pub fn router(state: AppState) -> Router {
     let router = Router::new()
         .route("/inbox", post(create_inbox::create_inbox))
+        .route("/inbox/{name}/config", get(vault_config::get_vault_config))
         .route("/inbox/{name}/upload", post(upload::upload_root))
         .route("/inbox/{name}/upload/{*path}", post(upload::upload_path))
         .route("/inbox/{name}/unlock", post(unlock::unlock))
@@ -118,9 +122,11 @@ pub fn router(state: AppState) -> Router {
         .route("/inbox/{name}/list", get(list_files::list_files))
         .route("/inbox/{name}/download/{*path}", get(download::download_file))
         .route("/inbox/{name}/metadata/{*path}", get(metadata::download_metadata))
+        .route("/inbox/{name}/delete/{*path}", axum::routing::delete(delete::delete_file))
         // Raw endpoints (work without vault unlock)
         .route("/inbox/{name}/raw/list", get(list_files_raw::list_files_raw))
         .route("/inbox/{name}/raw/download/{*path}", get(download_raw::download_raw))
+        .route("/inbox/{name}/raw/delete/{*path}", axum::routing::delete(delete_raw::delete_raw))
         .with_state(state);
 
     if let Some(cors) = cors_layer_from_env() {
