@@ -87,13 +87,33 @@ The repository includes a complete `Dockerfile` and `docker-compose.yml` to set 
 
 ### Docker Compose
 
-The simplest way to start the service is via Docker Compose:
+The simplest way to start the service from this repository is via Docker Compose:
 
 ```bash
-docker-compose up --build -d
+docker compose up --build -d
 ```
 
 This will run the Axum API on port `3000` and permanently mount the host's local `./vaults` directory into the container to ensure encrypted files survive restarts.
+
+If you want to run directly from the published image in GHCR, create a `docker-compose.yml` like this:
+
+```yaml
+services:
+  age-inbox:
+    image: ghcr.io/cypherbits/age-inbox:latest
+    container_name: age-inbox
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./vaults:/app/vaults
+    restart: unless-stopped
+```
+
+Then start it with:
+
+```bash
+docker compose up -d
+```
 
 ### Native Execution
 
