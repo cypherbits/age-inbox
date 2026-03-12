@@ -11,6 +11,8 @@ jobs:
     permissions:
       contents: write # Needed to create tags and releases
       packages: write # Needed to publish to GHCR
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout repository
