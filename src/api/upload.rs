@@ -87,12 +87,12 @@ async fn handle_upload(
     let file = tokio::fs::File::create(&filepath)
         .await
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let encryptor = Encryptor::with_recipients(vec![Box::new(recipient.clone())])
+    let encryptor = Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
         .expect("we provided a recipient");
     let mut async_writer = encryptor
         .wrap_async_output(file.compat_write())
         .await
-        .map_err(|e: age::EncryptError| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let is_multipart = req
         .headers()
@@ -117,7 +117,7 @@ async fn handle_upload(
         .await
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let meta_encryptor =
-        Encryptor::with_recipients(vec![Box::new(recipient)]).expect("we provided a recipient");
+        Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient)).expect("we provided a recipient");
     let mut meta_writer = meta_encryptor
         .wrap_async_output(meta_file.compat_write())
         .await

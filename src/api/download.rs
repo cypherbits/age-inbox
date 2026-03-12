@@ -34,10 +34,10 @@ async fn metadata_filename(
     }
 
     let meta_file = tokio::fs::File::open(meta_path).await.ok()?;
-    let decryptor = match Decryptor::new_async(meta_file.compat()).await.ok()? {
-        Decryptor::Recipients(d) => d,
-        _ => return None,
-    };
+    let decryptor = Decryptor::new_async(meta_file.compat()).await.ok()?;
+    if decryptor.is_scrypt() {
+        return None;
+    }
 
     let async_reader = decryptor
         .decrypt_async(std::iter::once(identity as &dyn age::Identity))
@@ -130,13 +130,13 @@ pub(crate) async fn download_file(
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let decryptor = match Decryptor::new_async(fs_file.compat()).await {
-        Ok(Decryptor::Recipients(d)) => d,
-        Ok(_) => {
+        Ok(d) if d.is_scrypt() => {
             return Err(make_error(
                 StatusCode::BAD_REQUEST,
                 "Passphrase encryption not supported",
             ))
         }
+        Ok(d) => d,
         Err(e) => return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     };
 
