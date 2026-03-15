@@ -1,3 +1,3 @@
 pub mod api;
-pub mod crypto;
-pub mod inbox_core;
+pub use age_inbox_core::crypto;
+pub use age_inbox_core::inbox_core;

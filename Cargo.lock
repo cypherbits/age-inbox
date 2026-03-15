@@ -58,15 +58,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "age-inbox"
+name = "age-inbox-core"
 version = "0.1.0"
 dependencies = [
  "age",
  "anyhow",
  "argon2",
+ "bech32 0.11.1",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "zeroize",
+]
+
+[[package]]
+name = "age-inbox-server"
+version = "0.1.0"
+dependencies = [
+ "age",
+ "age-inbox-core",
  "axum",
  "axum-server",
- "bech32 0.11.1",
  "clap",
  "futures-util",
  "rcgen",
@@ -79,7 +93,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "zeroize",
 ]
 
 [[package]]

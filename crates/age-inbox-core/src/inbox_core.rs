@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
-use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use tokio_util::compat::{
+    FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt,
+};
 
 use crate::crypto::derive_keys;
 
@@ -158,8 +160,8 @@ pub async fn write_vault_config_file(
     let mut permissions = VaultPermissions::default();
     permissions.allow_subfolders = allow_subfolders;
 
-    let permissions_json = serde_json::to_string(&permissions)
-        .map_err(|e| InboxCoreError::Serialize(e.to_string()))?;
+    let permissions_json =
+        serde_json::to_string(&permissions).map_err(|e| InboxCoreError::Serialize(e.to_string()))?;
 
     let config_content = format!(
         "inbox-name: {}\npublic-key: {}\npermissions: {}\n",
@@ -188,8 +190,7 @@ pub async fn create_vault(
         return Err(InboxCoreError::VaultExists);
     }
 
-    let keys = derive_keys(&password, name)
-        .map_err(|e| InboxCoreError::Crypto(e.to_string()))?;
+    let keys = derive_keys(&password, name).map_err(|e| InboxCoreError::Crypto(e.to_string()))?;
 
     tokio::fs::create_dir_all(&vault_dir)
         .await
@@ -219,11 +220,12 @@ pub async fn unlock_vault(
 
     let config = read_vault_config_file(&vault_dir).await?;
     if !config.permissions.allow_lock_unlock {
-        return Err(InboxCoreError::Crypto("lock/unlock disabled in config".to_string()));
+        return Err(InboxCoreError::Crypto(
+            "lock/unlock disabled in config".to_string(),
+        ));
     }
 
-    let keys = derive_keys(&password, name)
-        .map_err(|e| InboxCoreError::Crypto(e.to_string()))?;
+    let keys = derive_keys(&password, name).map_err(|e| InboxCoreError::Crypto(e.to_string()))?;
 
     if keys.recipient.to_string() != config.public_key {
         return Err(InboxCoreError::InvalidPassword);
@@ -257,7 +259,9 @@ pub async fn lock_vault(
 
     let config = read_vault_config_file(&vault_dir).await?;
     if !config.permissions.allow_lock_unlock {
-        return Err(InboxCoreError::Crypto("lock/unlock disabled in config".to_string()));
+        return Err(InboxCoreError::Crypto(
+            "lock/unlock disabled in config".to_string(),
+        ));
     }
 
     let mut vaults = unlocked_vaults.write().await;
@@ -363,7 +367,8 @@ pub async fn encrypt_metadata_file(
     metadata: &FileMetadata,
     output_path: &Path,
 ) -> Result<(), InboxCoreError> {
-    let bytes = serde_json::to_vec(metadata).map_err(|e| InboxCoreError::Serialize(e.to_string()))?;
+    let bytes =
+        serde_json::to_vec(metadata).map_err(|e| InboxCoreError::Serialize(e.to_string()))?;
 
     let file = tokio::fs::File::create(output_path)
         .await

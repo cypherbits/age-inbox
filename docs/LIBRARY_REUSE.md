@@ -1,10 +1,15 @@
-# Reusable Library Plan (No REST)
+# Reusable Library Architecture (No REST in Core)
 
-## What Was Refactored
+## What Is Implemented
 
-The project now includes a reusable core module at:
+This repository now uses two crates in the same Git project:
 
-- `src/inbox_core.rs`
+- `age-inbox` (server crate)
+- `age-inbox-core` (reusable library crate)
+
+Core source location:
+
+- `crates/age-inbox-core/src`
 
 This module contains inbox-domain and cryptographic logic without REST concerns:
 
@@ -17,9 +22,9 @@ This module contains inbox-domain and cryptographic logic without REST concerns:
 
 ## Public Library Surface
 
-The core is exported from:
+The server crate re-exports core modules from:
 
-- `src/lib.rs` via `pub mod inbox_core;`
+- `src/lib.rs`
 
 So external Rust projects can depend on this crate and import:
 
@@ -54,11 +59,6 @@ To publish this as a reusable crate cleanly:
 6. Publish with:
    - `cargo publish`
 
-## Optional Next Refactor
+## Status
 
-For cleaner packaging, split into two crates in one workspace:
-
-- `age-inbox-core` (pure reusable logic)
-- `age-inbox-server` (Axum REST adapter that depends on core)
-
-This is the most typical layout when the goal is long-term reusable cryptographic domain logic plus a separate HTTP service.
+The repository already follows the single-repo multi-crate approach (no separate Git projects required).
