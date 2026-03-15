@@ -3,16 +3,26 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use tokio::time::{Duration, Instant};
-use zeroize::Zeroize;
-
-use crate::crypto::derive_keys;
+use tokio::time::Duration;
+use crate::inbox_core::{InboxCoreError, unlock_vault};
 
 use super::{
     config::read_vault_config,
-    types::{make_error, ApiError, AppState, GenericRes, UnlockReq, UnlockedVault, permission_denied},
+    types::{make_error, ApiError, AppState, GenericRes, UnlockReq, permission_denied},
     validation::is_valid_name,
 };
+
+fn map_core_error(err: InboxCoreError) -> ApiError {
+    match err {
+        InboxCoreError::InvalidName => make_error(StatusCode::BAD_REQUEST, "Invalid vault name"),
+        InboxCoreError::VaultNotFound => make_error(StatusCode::NOT_FOUND, "Vault not found"),
+        InboxCoreError::InvalidPassword => make_error(StatusCode::UNAUTHORIZED, "Invalid password"),
+        InboxCoreError::Io(msg)
+        | InboxCoreError::Crypto(msg)
+        | InboxCoreError::Serialize(msg) => make_error(StatusCode::INTERNAL_SERVER_ERROR, msg),
+        other => make_error(StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
+    }
+}
 
 /// Unlocks a vault for one hour when the password matches.
 pub(crate) async fn unlock(
@@ -32,24 +42,15 @@ pub(crate) async fn unlock(
         return Err(permission_denied());
     }
 
-    let mut password = payload.password;
-    let keys_result = derive_keys(&password, &name);
-    password.zeroize();
-    let keys = keys_result
-        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    if keys.recipient.to_string() != config.public_key {
-        return Err(make_error(StatusCode::UNAUTHORIZED, "Invalid password"));
-    }
-
-    let mut vaults = state.unlocked_vaults.write().await;
-    vaults.insert(
-        name.clone(),
-        UnlockedVault {
-            identity: keys.identity,
-            expires_at: Instant::now() + Duration::from_secs(3600),
-        },
-    );
+    unlock_vault(
+        &state.unlocked_vaults,
+        &state.vaults_dir,
+        &name,
+        payload.password,
+        Duration::from_secs(3600),
+    )
+    .await
+    .map_err(map_core_error)?;
 
     Ok(Json(GenericRes {
         message: format!("Vault {} unlocked for 1 hour", name),
