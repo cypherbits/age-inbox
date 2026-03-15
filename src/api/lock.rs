@@ -3,12 +3,24 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use crate::inbox_core::{InboxCoreError, lock_vault};
 
 use super::{
     config::read_vault_config,
     types::{make_error, ApiError, AppState, GenericRes, permission_denied},
     validation::is_valid_name,
 };
+
+fn map_core_error(err: InboxCoreError) -> ApiError {
+    match err {
+        InboxCoreError::InvalidName => make_error(StatusCode::BAD_REQUEST, "Invalid vault name"),
+        InboxCoreError::VaultNotFound => make_error(StatusCode::NOT_FOUND, "Vault not found"),
+        InboxCoreError::Io(msg)
+        | InboxCoreError::Crypto(msg)
+        | InboxCoreError::Serialize(msg) => make_error(StatusCode::INTERNAL_SERVER_ERROR, msg),
+        other => make_error(StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
+    }
+}
 
 /// Removes an unlocked vault from memory.
 pub(crate) async fn lock(
@@ -31,9 +43,11 @@ pub(crate) async fn lock(
         return Err(permission_denied());
     }
 
-    let mut vaults = state.unlocked_vaults.write().await;
+    let was_locked = lock_vault(&state.unlocked_vaults, &state.vaults_dir, &name)
+        .await
+        .map_err(map_core_error)?;
 
-    if vaults.remove(&name).is_some() {
+    if was_locked {
         Ok(Json(GenericRes {
             message: format!("Vault {} locked", name),
         }))

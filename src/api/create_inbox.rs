@@ -1,13 +1,21 @@
 use axum::{extract::State, http::StatusCode, Json};
-use zeroize::Zeroize;
-
-use crate::crypto::derive_keys;
+use crate::inbox_core::{InboxCoreError, create_vault};
 
 use super::{
-    config::write_vault_config,
     types::{make_error, ApiError, AppState, CreateInboxReq, CreateInboxRes},
     validation::is_valid_name,
 };
+
+fn map_core_error(err: InboxCoreError) -> ApiError {
+    match err {
+        InboxCoreError::InvalidName => make_error(StatusCode::BAD_REQUEST, "Invalid vault name"),
+        InboxCoreError::VaultExists => make_error(StatusCode::CONFLICT, "Vault already exists"),
+        InboxCoreError::Io(msg)
+        | InboxCoreError::Crypto(msg)
+        | InboxCoreError::Serialize(msg) => make_error(StatusCode::INTERNAL_SERVER_ERROR, msg),
+        other => make_error(StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
+    }
+}
 
 /// Creates a new inbox vault and stores its public configuration.
 pub(crate) async fn create_inbox(
@@ -23,27 +31,17 @@ pub(crate) async fn create_inbox(
         return Err(make_error(StatusCode::CONFLICT, "Vault already exists"));
     }
 
-    let mut password = payload.password;
-    let keys_result = derive_keys(&password, &payload.name);
-    password.zeroize();
-    let keys = keys_result
-        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    tokio::fs::create_dir_all(&vault_dir)
-        .await
-        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let public_key = keys.recipient.to_string();
-    write_vault_config(
-        &vault_dir,
+    let created = create_vault(
+        &state.vaults_dir,
         &payload.name,
-        &public_key,
+        payload.password,
         payload.allow_subfolders.unwrap_or(false),
     )
-    .await?;
+    .await
+    .map_err(map_core_error)?;
 
     Ok(Json(CreateInboxRes {
         success: true,
-        public_key,
+        public_key: created.public_key,
     }))
 }

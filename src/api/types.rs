@@ -1,19 +1,14 @@
-use age::x25519::Identity;
 use axum::{http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
-use tokio::time::Instant;
+
+use crate::inbox_core::UnlockedVault;
 
 #[derive(Clone)]
 pub struct AppState {
     pub unlocked_vaults: Arc<RwLock<HashMap<String, UnlockedVault>>>,
     pub vaults_dir: PathBuf,
-}
-
-pub struct UnlockedVault {
-    pub identity: Identity,
-    pub expires_at: Instant,
 }
 
 #[derive(Deserialize)]

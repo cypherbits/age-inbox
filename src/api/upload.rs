@@ -12,6 +12,8 @@ use futures_util::StreamExt;
 use std::str::FromStr;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
+use age_inbox_core::inbox_core::{generate_drop_filename, metadata_sidecar_for};
+
 use super::{
     config::read_vault_config,
     types::{make_error, ApiError, AppState, FileMetadata, GenericRes, permission_denied},
@@ -82,13 +84,11 @@ async fn handle_upload(
 
     let recipient = Recipient::from_str(&config.public_key)
         .map_err(|_| make_error(StatusCode::INTERNAL_SERVER_ERROR, "Invalid public key"))?;
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .as_micros();
 
-    let filepath = target_dir.join(format!("upload_{}.age", timestamp));
-    let meta_filepath = target_dir.join(format!("upload_{}.meta.age", timestamp));
+    let drop_name = generate_drop_filename();
+    let filepath = target_dir.join(&drop_name);
+    let meta_filepath = metadata_sidecar_for(&filepath)
+        .expect("generated filename is a valid .age path");
 
     let file = tokio::fs::File::create(&filepath)
         .await
@@ -141,9 +141,9 @@ async fn handle_upload(
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let uploaded_path = if let Some(p) = subpath {
-        format!("{}/upload_{}.age", p, timestamp)
+        format!("{}/{}", p, drop_name)
     } else {
-        format!("upload_{}.age", timestamp)
+        drop_name
     };
 
     Ok(Json(GenericRes {
