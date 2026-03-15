@@ -120,6 +120,16 @@ pub fn metadata_sidecar_for(path: &Path) -> Option<PathBuf> {
     Some(path.with_file_name(meta_name))
 }
 
+/// Generates a unique random filename for an encrypted drop file.
+/// Returns a name like `drop-<32 hex chars>.age`.
+pub fn generate_drop_filename() -> String {
+    use rand::Rng;
+    let mut bytes = [0u8; 16];
+    rand::rng().fill_bytes(&mut bytes);
+    let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    format!("drop-{}.age", hex)
+}
+
 pub async fn read_vault_config_file(vault_dir: &Path) -> Result<VaultConfig, InboxCoreError> {
     let config_path = vault_dir.join(".inbox-age.config");
     let content = tokio::fs::read_to_string(&config_path)

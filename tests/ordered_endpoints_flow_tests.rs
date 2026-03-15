@@ -116,7 +116,7 @@ async fn ordered_full_endpoints_flow() {
         .unwrap();
     assert_eq!(upload_sub_res.status(), StatusCode::OK);
     let upload_sub_body = upload_sub_res.json::<GenericRes>().await.unwrap();
-    assert!(upload_sub_body.message.contains("folder/a/upload_"));
+    assert!(upload_sub_body.message.contains("folder/a/drop-"));
 
     // 5) GET /inbox/{name}/raw/list
     let raw_list_res = client
