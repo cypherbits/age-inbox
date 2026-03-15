@@ -6,8 +6,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
-use tokio::sync::RwLock;
-use tokio::time::{Duration, Instant};
+use std::time::{Duration, Instant};
 use tokio_util::compat::{
     FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt,
 };
@@ -213,7 +212,7 @@ pub async fn create_vault(
 }
 
 pub async fn unlock_vault(
-    unlocked_vaults: &RwLock<HashMap<String, UnlockedVault>>,
+    unlocked_vaults: &mut HashMap<String, UnlockedVault>,
     vaults_dir: &Path,
     name: &str,
     password: String,
@@ -241,8 +240,7 @@ pub async fn unlock_vault(
         return Err(InboxCoreError::InvalidPassword);
     }
 
-    let mut vaults = unlocked_vaults.write().await;
-    vaults.insert(
+    unlocked_vaults.insert(
         name.to_string(),
         UnlockedVault {
             identity: keys.identity,
@@ -254,7 +252,7 @@ pub async fn unlock_vault(
 }
 
 pub async fn lock_vault(
-    unlocked_vaults: &RwLock<HashMap<String, UnlockedVault>>,
+    unlocked_vaults: &mut HashMap<String, UnlockedVault>,
     vaults_dir: &Path,
     name: &str,
 ) -> Result<bool, InboxCoreError> {
@@ -274,18 +272,16 @@ pub async fn lock_vault(
         ));
     }
 
-    let mut vaults = unlocked_vaults.write().await;
-    Ok(vaults.remove(name).is_some())
+    Ok(unlocked_vaults.remove(name).is_some())
 }
 
-pub async fn get_unlocked_identity(
-    unlocked_vaults: &RwLock<HashMap<String, UnlockedVault>>,
+pub fn get_unlocked_identity(
+    unlocked_vaults: &mut HashMap<String, UnlockedVault>,
     name: &str,
 ) -> Result<Identity, InboxCoreError> {
-    let mut vaults = unlocked_vaults.write().await;
-    if let Some(vault) = vaults.get(name) {
+    if let Some(vault) = unlocked_vaults.get(name) {
         if Instant::now() > vault.expires_at {
-            vaults.remove(name);
+            unlocked_vaults.remove(name);
             return Err(InboxCoreError::VaultUnlockExpired);
         }
         return Ok(vault.identity.clone());

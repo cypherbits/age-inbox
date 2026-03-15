@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use tokio::time::Duration;
+use std::time::Duration;
 use crate::inbox_core::{InboxCoreError, unlock_vault};
 
 use super::{
@@ -42,8 +42,9 @@ pub(crate) async fn unlock(
         return Err(permission_denied());
     }
 
+    let mut vaults = state.unlocked_vaults.write().await;
     unlock_vault(
-        &state.unlocked_vaults,
+        &mut *vaults,
         &state.vaults_dir,
         &name,
         payload.password,
