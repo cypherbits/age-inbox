@@ -6,7 +6,7 @@ use axum::{
 };
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
-use tokio::time::Instant;
+use std::time::Instant;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
 use super::{

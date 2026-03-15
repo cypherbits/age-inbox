@@ -43,7 +43,8 @@ pub(crate) async fn lock(
         return Err(permission_denied());
     }
 
-    let was_locked = lock_vault(&state.unlocked_vaults, &state.vaults_dir, &name)
+    let mut vaults = state.unlocked_vaults.write().await;
+    let was_locked = lock_vault(&mut *vaults, &state.vaults_dir, &name)
         .await
         .map_err(map_core_error)?;
 
