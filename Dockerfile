@@ -4,6 +4,7 @@ WORKDIR /usr/src/app
 
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
+COPY crates ./crates
 COPY tests ./tests
 
 RUN cargo test && cargo build --release
