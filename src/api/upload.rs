@@ -1,11 +1,9 @@
 use age::{x25519::Recipient, Encryptor};
 use axum::{
-    body::Body,
     extract::{Path, Request, State},
     http::{header, StatusCode},
     Json,
 };
-use futures_util::StreamExt;
 use std::str::FromStr;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
@@ -103,11 +101,14 @@ async fn handle_upload(
         .and_then(|val| val.to_str().ok())
         .is_some_and(|s| s.starts_with("multipart/form-data"));
 
-    let metadata = if is_multipart {
-        handle_multipart_upload(req, &state, &mut async_writer).await?
-    } else {
-        handle_raw_upload(req, &mut async_writer).await?
-    };
+    if !is_multipart {
+        return Err(make_error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Content-Type must be multipart/form-data",
+        ));
+    }
+
+    let metadata = handle_multipart_upload(req, &state, &mut async_writer).await?;
 
     futures_util::AsyncWriteExt::flush(&mut async_writer)
         .await
@@ -161,6 +162,8 @@ async fn handle_multipart_upload(
         .map_err(|e| make_error(StatusCode::BAD_REQUEST, format!("Invalid multipart: {}", e)))?;
 
     let mut metadata = FileMetadata::default();
+    let mut multipart_file_name: Option<String> = None;
+    let mut form_filename: Option<String> = None;
     let mut found_file = false;
 
     while let Some(mut field) = multipart
@@ -172,7 +175,10 @@ async fn handle_multipart_upload(
 
         if field_name == "file" || (field_name.is_empty() && !found_file) {
             if let Some(fname) = field.file_name() {
-                metadata.filename = Some(fname.to_string());
+                let trimmed = fname.trim();
+                if !trimmed.is_empty() {
+                    multipart_file_name = Some(trimmed.to_string());
+                }
             }
             found_file = true;
 
@@ -191,7 +197,10 @@ async fn handle_multipart_upload(
             }
         } else if field_name == "filename" {
             if let Ok(text) = field.text().await {
-                metadata.filename = Some(text);
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    form_filename = Some(trimmed.to_string());
+                }
             }
         } else if field_name == "extended" {
             if let Ok(text) = field.text().await {
@@ -213,22 +222,12 @@ async fn handle_multipart_upload(
         ));
     }
 
-    Ok(metadata)
-}
-
-async fn handle_raw_upload(
-    req: Request,
-    async_writer: &mut (impl futures_util::AsyncWriteExt + Unpin),
-) -> Result<FileMetadata, ApiError> {
-    let metadata = FileMetadata::default();
-
-    let body: Body = req.into_body();
-    let mut stream = body.into_data_stream();
-    while let Some(chunk) = stream.next().await {
-        let data = chunk.map_err(|e| make_error(StatusCode::BAD_REQUEST, e.to_string()))?;
-        futures_util::AsyncWriteExt::write_all(async_writer, &data)
-            .await
-            .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    metadata.filename = form_filename.or(multipart_file_name);
+    if metadata.filename.is_none() {
+        return Err(make_error(
+            StatusCode::BAD_REQUEST,
+            "Missing filename: provide non-empty 'filename' field or a filename in the multipart file part",
+        ));
     }
 
     Ok(metadata)
