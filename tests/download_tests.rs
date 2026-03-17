@@ -15,8 +15,7 @@ async fn download_returns_decrypted_file() {
         .text("filename", "secret.txt")
         .part(
             "file",
-            reqwest::multipart::Part::bytes(b"hello world raw!".to_vec())
-                .file_name("secret.txt"),
+            reqwest::multipart::Part::bytes(b"hello world raw!".to_vec()).file_name("secret.txt"),
         );
 
     let upload = client
@@ -44,7 +43,10 @@ async fn download_returns_decrypted_file() {
         .to_string();
 
     let downloaded = client
-        .get(format!("{}/inbox/testvault/download/{}", base_url, root_file))
+        .get(format!(
+            "{}/inbox/testvault/download/{}",
+            base_url, root_file
+        ))
         .send()
         .await
         .unwrap();
@@ -103,7 +105,10 @@ async fn metadata_endpoint_returns_json_and_download_rejects_sidecar() {
     let meta_file = format!("{}.meta.age", data_file.trim_end_matches(".age"));
 
     let invalid_download = client
-        .get(format!("{}/inbox/testvault/download/{}", base_url, meta_file))
+        .get(format!(
+            "{}/inbox/testvault/download/{}",
+            base_url, meta_file
+        ))
         .send()
         .await
         .unwrap();
@@ -111,7 +116,10 @@ async fn metadata_endpoint_returns_json_and_download_rejects_sidecar() {
     assert_eq!(invalid_download.status(), StatusCode::BAD_REQUEST);
 
     let metadata_response = client
-        .get(format!("{}/inbox/testvault/metadata/{}", base_url, data_file))
+        .get(format!(
+            "{}/inbox/testvault/metadata/{}",
+            base_url, data_file
+        ))
         .send()
         .await
         .unwrap();
@@ -120,8 +128,14 @@ async fn metadata_endpoint_returns_json_and_download_rejects_sidecar() {
     let metadata: FileMetadata = metadata_response.json().await.unwrap();
     assert_eq!(metadata.filename, Some("subfile.txt".to_string()));
     assert_eq!(metadata.origin, Some("local".to_string()));
-    assert!(metadata.filesize.is_some(), "Metadata should include filesize");
-    assert!(metadata.filesize.unwrap() > 0, "filesize should be positive");
+    assert!(
+        metadata.filesize.is_some(),
+        "Metadata should include filesize"
+    );
+    assert!(
+        metadata.filesize.unwrap() > 0,
+        "filesize should be positive"
+    );
 }
 
 /// Download endpoint supports HTTP Range header on decrypted content.
@@ -136,8 +150,7 @@ async fn download_range_returns_partial_content() {
         .text("filename", "rangetest.txt")
         .part(
             "file",
-            reqwest::multipart::Part::bytes(original_content.to_vec())
-                .file_name("rangetest.txt"),
+            reqwest::multipart::Part::bytes(original_content.to_vec()).file_name("rangetest.txt"),
         );
 
     let upload = client
@@ -164,7 +177,10 @@ async fn download_range_returns_partial_content() {
 
     // Range request: bytes 0-4 should return "hello"
     let range_response = client
-        .get(format!("{}/inbox/testvault/download/{}", base_url, data_file))
+        .get(format!(
+            "{}/inbox/testvault/download/{}",
+            base_url, data_file
+        ))
         .header("Range", "bytes=0-4")
         .send()
         .await
@@ -174,4 +190,4 @@ async fn download_range_returns_partial_content() {
     assert!(range_response.headers().get("accept-ranges").is_some());
     let partial = range_response.text().await.unwrap();
     assert_eq!(partial, "hello");
-}
+}

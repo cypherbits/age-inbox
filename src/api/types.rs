@@ -12,10 +12,23 @@ pub struct AppState {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateInboxPermissionsReq {
+    pub allow_subfolders: Option<bool>,
+    pub allow_upload: Option<bool>,
+    pub allow_download: Option<bool>,
+    pub allow_list: Option<bool>,
+    pub allow_delete: Option<bool>,
+    pub allow_metadata: Option<bool>,
+    pub allow_lock_unlock: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateInboxReq {
     pub name: String,
     pub password: String,
-    pub allow_subfolders: Option<bool>,
+    pub permissions: Option<CreateInboxPermissionsReq>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -70,6 +83,8 @@ pub struct RawListedFile {
 }
 
 pub fn permission_denied() -> ApiError {
-    make_error(StatusCode::FORBIDDEN, "Permission denied for this operation")
+    make_error(
+        StatusCode::FORBIDDEN,
+        "Permission denied for this operation",
+    )
 }
-

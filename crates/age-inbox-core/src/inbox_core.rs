@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio_util::compat::{
     FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt,
 };
@@ -162,19 +162,15 @@ pub async fn read_vault_config_file(vault_dir: &Path) -> Result<VaultConfig, Inb
 pub async fn write_vault_config_file(
     vault_dir: &Path,
     inbox_name: &str,
-    public_key: &str,
-    allow_subfolders: bool,
+    config: &VaultConfig,
 ) -> Result<(), InboxCoreError> {
     let config_path = vault_dir.join(".inbox-age.config");
-    let mut permissions = VaultPermissions::default();
-    permissions.allow_subfolders = allow_subfolders;
-
-    let permissions_json =
-        serde_json::to_string(&permissions).map_err(|e| InboxCoreError::Serialize(e.to_string()))?;
+    let permissions_json = serde_json::to_string(&config.permissions)
+        .map_err(|e| InboxCoreError::Serialize(e.to_string()))?;
 
     let config_content = format!(
         "inbox-name: {}\npublic-key: {}\npermissions: {}\n",
-        inbox_name, public_key, permissions_json
+        inbox_name, config.public_key, permissions_json
     );
 
     tokio::fs::write(config_path, config_content)
@@ -188,7 +184,7 @@ pub async fn create_vault(
     vaults_dir: &Path,
     name: &str,
     password: String,
-    allow_subfolders: bool,
+    permissions: VaultPermissions,
 ) -> Result<CreateVaultResult, InboxCoreError> {
     if !is_valid_name(name) {
         return Err(InboxCoreError::InvalidName);
@@ -206,7 +202,11 @@ pub async fn create_vault(
         .map_err(|e| InboxCoreError::Io(e.to_string()))?;
 
     let public_key = keys.recipient.to_string();
-    write_vault_config_file(&vault_dir, name, &public_key, allow_subfolders).await?;
+    let config = VaultConfig {
+        public_key: public_key.clone(),
+        permissions,
+    };
+    write_vault_config_file(&vault_dir, name, &config).await?;
 
     Ok(CreateVaultResult { public_key })
 }

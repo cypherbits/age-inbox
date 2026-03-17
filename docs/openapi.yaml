@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Age Inbox API
   description: A REST API for creating Age-encrypted password-protected file inboxes. Supports encrypted metadata, subfolders on-the-fly, raw (locked) file access, and HTTP Range requests.
-  version: 1.4.0
+  version: 1.5.0
   license:
     name: MIT
 servers:
@@ -53,6 +53,31 @@ components:
         allow_lock_unlock:
           type: boolean
           description: Whether lock and unlock operations are allowed.
+    CreateInboxPermissions:
+      type: object
+      description: Optional permission overrides for vault creation. Any omitted field falls back to the server default.
+      properties:
+        allow_subfolders:
+          type: boolean
+          description: Whether uploads to subdirectories are allowed. Default is false.
+        allow_upload:
+          type: boolean
+          description: Whether file uploads to the vault are allowed. Default is true.
+        allow_download:
+          type: boolean
+          description: Whether downloading and decrypting files is allowed (requires vault unlock). Default is true.
+        allow_list:
+          type: boolean
+          description: Whether listing vault files is allowed. Default is true.
+        allow_delete:
+          type: boolean
+          description: Whether file deletion is allowed. Default is true.
+        allow_metadata:
+          type: boolean
+          description: Whether accessing decrypted file metadata is allowed. Default is true.
+        allow_lock_unlock:
+          type: boolean
+          description: Whether lock and unlock operations are allowed. Default is true.
     FileMetadata:
       type: object
       properties:
@@ -120,9 +145,8 @@ paths:
                 password:
                   type: string
                   description: Password to derive the key using Argon2id.
-                allow_subfolders:
-                  type: boolean
-                  description: Configuration to allow creation of folders on the fly during upload. Default is false.
+                permissions:
+                  $ref: '#/components/schemas/CreateInboxPermissions'
       responses:
         '200':
           description: Vault successfully created.

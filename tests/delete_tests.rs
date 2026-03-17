@@ -14,8 +14,7 @@ async fn delete_file_removes_file_and_metadata() {
         .text("filename", "test.txt")
         .part(
             "file",
-            reqwest::multipart::Part::bytes(b"test content".to_vec())
-                .file_name("test.txt"),
+            reqwest::multipart::Part::bytes(b"test content".to_vec()).file_name("test.txt"),
         );
 
     let upload = client
@@ -74,8 +73,7 @@ async fn delete_file_fails_when_locked() {
         .text("filename", "test.txt")
         .part(
             "file",
-            reqwest::multipart::Part::bytes(b"test content".to_vec())
-                .file_name("test.txt"),
+            reqwest::multipart::Part::bytes(b"test content".to_vec()).file_name("test.txt"),
         );
 
     let upload = client
@@ -127,10 +125,12 @@ async fn delete_file_returns_404_when_not_found() {
 
     // Try to delete non-existent file
     let delete = client
-        .delete(format!("{}/inbox/testvault/delete/nonexistent.age", base_url))
+        .delete(format!(
+            "{}/inbox/testvault/delete/nonexistent.age",
+            base_url
+        ))
         .send()
         .await
         .unwrap();
     assert_eq!(delete.status(), StatusCode::NOT_FOUND);
 }
-

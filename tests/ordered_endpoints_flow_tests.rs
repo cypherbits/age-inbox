@@ -61,15 +61,23 @@ async fn ordered_full_endpoints_flow() {
         .json(&serde_json::json!({
             "name": vault,
             "password": password,
-            "allow_subfolders": true
+            "permissions": {
+                "allow_subfolders": true
+            }
         }))
         .send()
         .await
         .unwrap();
     assert_eq!(create_res.status(), StatusCode::OK);
     let create_body = create_res.json::<serde_json::Value>().await.unwrap();
-    assert_eq!(create_body.get("success").and_then(|v| v.as_bool()), Some(true));
-    assert!(create_body.get("public_key").and_then(|v| v.as_str()).is_some());
+    assert_eq!(
+        create_body.get("success").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert!(create_body
+        .get("public_key")
+        .and_then(|v| v.as_str())
+        .is_some());
 
     // 2) GET /inbox/{name}/config
     let config_res = client
@@ -144,7 +152,10 @@ async fn ordered_full_endpoints_flow() {
 
     // 6) GET /inbox/{name}/raw/download/{path}
     let raw_download_res = client
-        .get(format!("{}/inbox/{}/raw/download/{}", base_url, vault, sub_file_path))
+        .get(format!(
+            "{}/inbox/{}/raw/download/{}",
+            base_url, vault, sub_file_path
+        ))
         .send()
         .await
         .unwrap();
@@ -157,7 +168,10 @@ async fn ordered_full_endpoints_flow() {
         Some("bytes")
     );
     assert!(raw_download_res.headers().get("content-length").is_some());
-    assert!(raw_download_res.headers().get("content-disposition").is_some());
+    assert!(raw_download_res
+        .headers()
+        .get("content-disposition")
+        .is_some());
     let raw_download_body = raw_download_res.bytes().await.unwrap();
     assert!(!raw_download_body.is_empty());
 
@@ -192,7 +206,10 @@ async fn ordered_full_endpoints_flow() {
 
     // 9) GET /inbox/{name}/download/{path}
     let download_res = client
-        .get(format!("{}/inbox/{}/download/{}", base_url, vault, sub_file_path))
+        .get(format!(
+            "{}/inbox/{}/download/{}",
+            base_url, vault, sub_file_path
+        ))
         .send()
         .await
         .unwrap();
@@ -210,7 +227,10 @@ async fn ordered_full_endpoints_flow() {
 
     // 10) GET /inbox/{name}/metadata/{path}
     let metadata_res = client
-        .get(format!("{}/inbox/{}/metadata/{}", base_url, vault, sub_file_path))
+        .get(format!(
+            "{}/inbox/{}/metadata/{}",
+            base_url, vault, sub_file_path
+        ))
         .send()
         .await
         .unwrap();
@@ -230,7 +250,10 @@ async fn ordered_full_endpoints_flow() {
 
     // 12) DELETE /inbox/{name}/raw/delete/{path}
     let raw_delete_res = client
-        .delete(format!("{}/inbox/{}/raw/delete/{}", base_url, vault, root_file_path))
+        .delete(format!(
+            "{}/inbox/{}/raw/delete/{}",
+            base_url, vault, root_file_path
+        ))
         .send()
         .await
         .unwrap();
@@ -247,10 +270,12 @@ async fn ordered_full_endpoints_flow() {
 
     // 14) DELETE /inbox/{name}/delete/{path}
     let delete_res = client
-        .delete(format!("{}/inbox/{}/delete/{}", base_url, vault, sub_file_path))
+        .delete(format!(
+            "{}/inbox/{}/delete/{}",
+            base_url, vault, sub_file_path
+        ))
         .send()
         .await
         .unwrap();
     assert_eq!(delete_res.status(), StatusCode::OK);
 }
-
