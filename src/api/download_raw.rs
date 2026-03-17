@@ -8,36 +8,10 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use super::{
     config::read_vault_config,
+    http_range::{parse_single_range, unsatisfied_content_range},
     types::{make_error, permission_denied, ApiError, AppState},
     validation::{is_valid_name, is_valid_subpath},
 };
-
-/// Parses a single-range `Range: bytes=start-end` header.
-/// Returns `(start, Option<end>)`. `end` is inclusive if present.
-fn parse_range(header_value: &str, file_size: u64) -> Option<(u64, u64)> {
-    let s = header_value.strip_prefix("bytes=")?;
-    let (start_str, end_str) = s.split_once('-')?;
-
-    if start_str.is_empty() {
-        // suffix range: bytes=-500 means last 500 bytes
-        let suffix_len: u64 = end_str.parse().ok()?;
-        if suffix_len == 0 || suffix_len > file_size {
-            return None;
-        }
-        Some((file_size - suffix_len, file_size - 1))
-    } else {
-        let start: u64 = start_str.parse().ok()?;
-        let end = if end_str.is_empty() {
-            file_size - 1
-        } else {
-            end_str.parse().ok()?
-        };
-        if start > end || start >= file_size {
-            return None;
-        }
-        Some((start, end.min(file_size - 1)))
-    }
-}
 
 /// Downloads an encrypted `.age` file as-is (without decryption).
 /// Works regardless of vault lock state. Supports HTTP Range requests.
@@ -87,9 +61,20 @@ pub(crate) async fn download_raw(
     let range_header = headers
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| parse_range(v, file_size));
+        .map(|v| parse_single_range(v, file_size));
 
-    if let Some((start, end)) = range_header {
+    if let Some(None) = range_header {
+        let body = Body::from("Range not satisfiable");
+        let response = Response::builder()
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .header(header::CONTENT_RANGE, unsatisfied_content_range(file_size))
+            .body(body)
+            .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        return Ok(response);
+    }
+
+    if let Some(Some((start, end))) = range_header {
         let length = end - start + 1;
         let mut file = tokio::fs::File::open(&filepath)
             .await
