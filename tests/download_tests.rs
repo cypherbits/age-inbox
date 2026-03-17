@@ -117,9 +117,9 @@ async fn download_without_metadata_sidecar_still_works() {
     assert_eq!(downloaded.bytes().await.unwrap().to_vec(), payload);
 }
 
-/// If metadata sidecar is missing, Range requests degrade to full response.
+/// If metadata sidecar is missing, Range requests still return partial content.
 #[tokio::test]
-async fn download_without_metadata_sidecar_with_range_returns_full_response() {
+async fn download_without_metadata_sidecar_with_range_returns_partial_content() {
     let (base_url, dir) = common::setup_app().await;
     let client = reqwest::Client::new();
     common::create_vault(&client, &base_url, true).await;
@@ -164,8 +164,8 @@ async fn download_without_metadata_sidecar_with_range_returns_full_response() {
         .await
         .unwrap();
 
-    assert_eq!(downloaded.status(), StatusCode::OK);
-    assert_eq!(downloaded.bytes().await.unwrap().to_vec(), payload);
+    assert_eq!(downloaded.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(downloaded.bytes().await.unwrap().to_vec(), b"range".to_vec());
 }
 
 /// Metadata is exposed via dedicated endpoint and metadata sidecars are rejected by download.
