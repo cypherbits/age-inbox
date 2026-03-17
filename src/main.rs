@@ -39,6 +39,18 @@ struct Cli {
     /// Enable HTTPS using a self-signed or provided certificate
     #[arg(long)]
     https: bool,
+
+    /// Host/IP to bind the HTTP(S) server
+    #[arg(long, default_value = "0.0.0.0")]
+    host: String,
+
+    /// TCP port to bind the HTTP(S) server
+    #[arg(long, default_value_t = 3000)]
+    port: u16,
+
+    /// Vault storage directory
+    #[arg(long, default_value = "./vaults")]
+    vaults_dir: std::path::PathBuf,
 }
 
 #[tokio::main]
@@ -49,7 +61,7 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    let vaults_dir = std::path::PathBuf::from("./vaults");
+    let vaults_dir = cli.vaults_dir;
     tokio::fs::create_dir_all(&vaults_dir).await.unwrap();
 
     let state = AppState {
@@ -58,7 +70,9 @@ async fn main() {
     };
 
     let app = api::router(state);
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 3000));
+    let addr = format!("{}:{}", cli.host, cli.port)
+        .parse::<std::net::SocketAddr>()
+        .unwrap();
 
     if cli.https {
         let cert_path = "cert.pem";

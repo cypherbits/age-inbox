@@ -78,6 +78,12 @@ cargo run --release
 
 The application will listen on HTTP `0.0.0.0:3000` and create a local `vaults` folder. 
 
+You can override bind address and storage path:
+
+```bash
+cargo run --release -- --host 127.0.0.1 --port 3001 --vaults-dir ./my-vaults
+```
+
 ## Environment Variables
 
 The server supports CORS and logging configuration via environment variables.
@@ -111,6 +117,16 @@ cargo run --release -- --https
 ```
 
 Upon the first startup with `--https`, it will automatically generate a self-signed `cert.pem` and `key.pem` in the current directory.
+
+## E2E Tests
+
+The repository includes a dedicated E2E suite under `tests/e2e/` that boots the real server binary and validates the endpoint flow over HTTP.
+
+Run it with:
+
+```bash
+cargo test --test e2e_tests -- --test-threads=1
+```
 
 ### Certificate Pinning
 
