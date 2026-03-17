@@ -4,6 +4,11 @@ use age_inbox::api::FileMetadata;
 use age_inbox::api::ListedFile;
 use axum::http::StatusCode;
 
+#[derive(Debug, serde::Deserialize)]
+struct RawListedFile {
+    path: String,
+}
+
 /// Download endpoint decrypts uploaded raw files.
 #[tokio::test]
 async fn download_returns_decrypted_file() {
@@ -60,6 +65,107 @@ async fn download_returns_decrypted_file() {
     assert!(content_disposition.contains("filename=\"secret.txt\""));
     assert!(!content_disposition.contains(".age\""));
     assert_eq!(downloaded.text().await.unwrap(), "hello world raw!");
+}
+
+/// Download still works when metadata sidecar is missing (fallback path).
+#[tokio::test]
+async fn download_without_metadata_sidecar_still_works() {
+    let (base_url, dir) = common::setup_app().await;
+    let client = reqwest::Client::new();
+    common::create_vault(&client, &base_url, true).await;
+
+    let payload = b"fallback-without-meta".to_vec();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(payload.clone()).file_name("nometa.txt"),
+    );
+
+    let upload = client
+        .post(format!("{}/inbox/testvault/upload", base_url))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    let raw_list = client
+        .get(format!("{}/inbox/testvault/raw/list", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(raw_list.status(), StatusCode::OK);
+    let files: Vec<RawListedFile> = raw_list.json().await.unwrap();
+    let data_file = files
+        .iter()
+        .find(|f| f.path.ends_with(".age") && !f.path.ends_with(".meta.age"))
+        .map(|f| f.path.clone())
+        .expect("expected uploaded data file");
+
+    let meta_file = format!("{}.meta.age", data_file.trim_end_matches(".age"));
+    let meta_path = dir.path().join("testvault").join(meta_file);
+    tokio::fs::remove_file(meta_path).await.unwrap();
+
+    common::unlock_vault(&client, &base_url, "mypassword").await;
+
+    let downloaded = client
+        .get(format!("{}/inbox/testvault/download/{}", base_url, data_file))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(downloaded.status(), StatusCode::OK);
+    assert_eq!(downloaded.bytes().await.unwrap().to_vec(), payload);
+}
+
+/// If metadata sidecar is missing, Range requests degrade to full response.
+#[tokio::test]
+async fn download_without_metadata_sidecar_with_range_returns_full_response() {
+    let (base_url, dir) = common::setup_app().await;
+    let client = reqwest::Client::new();
+    common::create_vault(&client, &base_url, true).await;
+
+    let payload = b"range-fallback-no-meta".to_vec();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(payload.clone()).file_name("nometa-range.txt"),
+    );
+
+    let upload = client
+        .post(format!("{}/inbox/testvault/upload", base_url))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    let raw_list = client
+        .get(format!("{}/inbox/testvault/raw/list", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(raw_list.status(), StatusCode::OK);
+    let files: Vec<RawListedFile> = raw_list.json().await.unwrap();
+    let data_file = files
+        .iter()
+        .find(|f| f.path.ends_with(".age") && !f.path.ends_with(".meta.age"))
+        .map(|f| f.path.clone())
+        .expect("expected uploaded data file");
+
+    let meta_file = format!("{}.meta.age", data_file.trim_end_matches(".age"));
+    let meta_path = dir.path().join("testvault").join(meta_file);
+    tokio::fs::remove_file(meta_path).await.unwrap();
+
+    common::unlock_vault(&client, &base_url, "mypassword").await;
+
+    let downloaded = client
+        .get(format!("{}/inbox/testvault/download/{}", base_url, data_file))
+        .header("Range", "bytes=0-4")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(downloaded.status(), StatusCode::OK);
+    assert_eq!(downloaded.bytes().await.unwrap().to_vec(), payload);
 }
 
 /// Metadata is exposed via dedicated endpoint and metadata sidecars are rejected by download.

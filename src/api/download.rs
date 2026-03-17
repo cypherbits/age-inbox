@@ -299,60 +299,27 @@ pub(crate) async fn download_file(
                 .body(Body::from(body_bytes))
                 .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
         } else {
-            // Fallback: no filesize in metadata — decrypt entire file to determine total size.
+            // Fallback: no filesize in metadata.
+            // Some clients send Range by default; without a known cleartext size,
+            // serving ranged responses would require full in-memory decryption.
+            // Degrade to full streaming response to keep downloads working.
             tracing::warn!(
                 vault = %name,
                 file = %path,
-                "Missing metadata filesize; decrypting full file for range response",
+                "Missing metadata filesize; ignoring Range and streaming full response",
             );
-            let mut reader = async_reader.compat();
-            let mut all_bytes = Vec::new();
-            reader
-                .read_to_end(&mut all_bytes)
-                .await
-                .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-            let total_size = all_bytes.len() as u64;
-            let (start, end) =
-                if let Some(range) = parse_single_range(&range_header_value, total_size) {
-                    range
-                } else {
-                    tracing::warn!(
-                        vault = %name,
-                        file = %path,
-                        range = %range_header_value,
-                        total_size,
-                        "Invalid or unsatisfiable range request",
-                    );
-                    let body = Body::from("Range not satisfiable");
-                    let response = Response::builder()
-                        .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-                        .header(header::CONTENT_RANGE, unsatisfied_content_range(total_size))
-                        .body(body)
-                        .map_err(|e| {
-                            make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-                        })?;
-                    return Ok(response);
-                };
-
-            let slice = &all_bytes[start as usize..=end as usize];
-            let length = slice.len() as u64;
+            let stream = tokio_util::io::ReaderStream::new(async_reader.compat());
+            let body = Body::from_stream(stream);
 
             Response::builder()
-                .status(StatusCode::PARTIAL_CONTENT)
+                .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, content_type)
                 .header(
                     header::CONTENT_DISPOSITION,
                     format!("attachment; filename=\"{}\"", resolved_filename),
                 )
-                .header(header::CONTENT_LENGTH, length.to_string())
                 .header(header::ACCEPT_RANGES, "bytes")
-                .header(
-                    header::CONTENT_RANGE,
-                    format!("bytes {}-{}/{}", start, end, total_size),
-                )
-                .body(Body::from(slice.to_vec()))
+                .body(body)
                 .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
         }
     } else {
