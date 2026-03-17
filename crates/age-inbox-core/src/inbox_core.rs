@@ -368,6 +368,53 @@ pub async fn decrypt_age_file_to_writer<W: AsyncWrite + Unpin>(
     Ok(copied)
 }
 
+/// Decrypts only the bytes in [start, end] (inclusive) from an age-encrypted file.
+/// Skips `start` bytes by draining into sink, then writes `end - start + 1` bytes to `writer`.
+/// Memory usage is O(chunk_size) regardless of file size.
+pub async fn decrypt_age_file_range_to_writer<W: AsyncWrite + Unpin>(
+    identity: &Identity,
+    encrypted_path: &Path,
+    writer: &mut W,
+    start: u64,
+    end: u64,
+) -> Result<u64, InboxCoreError> {
+    let fs_file = tokio::fs::File::open(encrypted_path)
+        .await
+        .map_err(|e| InboxCoreError::Io(e.to_string()))?;
+
+    let decryptor = Decryptor::new_async(fs_file.compat())
+        .await
+        .map_err(|e| InboxCoreError::Crypto(e.to_string()))?;
+
+    if decryptor.is_scrypt() {
+        return Err(InboxCoreError::Crypto(
+            "passphrase encryption not supported".to_string(),
+        ));
+    }
+
+    let async_reader = decryptor
+        .decrypt_async(std::iter::once(identity as &dyn age::Identity))
+        .map_err(|e| InboxCoreError::Crypto(e.to_string()))?;
+
+    let compat_reader = async_reader.compat();
+
+    // Skip `start` bytes by draining into sink (decrypts only chunks up to `start`)
+    let mut skip_reader = compat_reader.take(start);
+    tokio::io::copy(&mut skip_reader, &mut tokio::io::sink())
+        .await
+        .map_err(|e| InboxCoreError::Io(e.to_string()))?;
+    let compat_reader = skip_reader.into_inner();
+
+    // Copy only the requested range bytes to writer
+    let bytes_to_read = end - start + 1;
+    let mut range_reader = compat_reader.take(bytes_to_read);
+    let written = tokio::io::copy(&mut range_reader, writer)
+        .await
+        .map_err(|e| InboxCoreError::Io(e.to_string()))?;
+
+    Ok(written)
+}
+
 pub async fn encrypt_metadata_file(
     recipient: &age::x25519::Recipient,
     metadata: &FileMetadata,
