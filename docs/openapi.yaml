@@ -210,7 +210,7 @@ paths:
     post:
       operationId: uploadFileRoot
       summary: Upload a file to a vault root
-      description: Streams request body through Age encryption and saves to the vault root. Metadata must be sent in `multipart/form-data` fields to avoid HTTP header size limits. Generates a separate `.meta.age` encrypted file.
+      description: Encrypts the multipart `file` stream and saves it to the vault root. Metadata must be sent in `multipart/form-data` fields to avoid HTTP header size limits. Generates a separate `.meta.age` encrypted file.
       security: []
       parameters:
         - in: path
@@ -221,19 +221,17 @@ paths:
           description: The name of the vault.
       requestBody:
         required: true
-        description: Raw binary data or multipart payload. For metadata (`filename`, `origin`, `extended`) use multipart fields.
+        description: Multipart payload containing the binary `file` part plus optional metadata fields.
         content:
-          application/octet-stream:
-            schema:
-              type: string
-              format: binary
           'multipart/form-data':
             schema:
               type: object
+              required:
+                - file
               properties:
                 filename:
                   type: string
-                  description: The original filename.
+                  description: Optional explicit filename. If omitted or empty, the server uses the multipart `file` part filename.
                 origin:
                   type: string
                   description: The source origin string.
@@ -243,7 +241,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: The binary file to encrypt and save.
+                  description: The binary file to encrypt and save. Its multipart filename is used as fallback when `filename` is missing/empty.
       responses:
         '200':
           description: File successfully encrypted and stored with metadata.
@@ -252,7 +250,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/GenericRes'
         '400':
-          description: Invalid vault name or malformed multipart payload.
+          description: Invalid vault name, malformed multipart payload, or missing filename in both field and file part.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
+        '415':
+          description: Unsupported media type. Content-Type must be multipart/form-data.
           content:
             application/json:
               schema:
@@ -273,7 +277,7 @@ paths:
     post:
       operationId: uploadFilePath
       summary: Upload a file to a subfolder within a vault
-      description: Encrypts stream directly to a nested folder inside the vault. Metadata must be sent in `multipart/form-data` fields to avoid HTTP header size limits. Fails if vault configuration disabled nested folders.
+      description: Encrypts multipart `file` stream directly to a nested folder inside the vault. Metadata must be sent in `multipart/form-data` fields to avoid HTTP header size limits. Fails if vault configuration disabled nested folders.
       security: []
       parameters:
         - in: path
@@ -290,18 +294,17 @@ paths:
           description: The relative subfolder path.
       requestBody:
         required: true
-        description: File payload stream or multipart form. Use multipart to include metadata fields.
+        description: Multipart form with `file` plus optional metadata fields.
         content:
-          application/octet-stream:
-            schema:
-              type: string
-              format: binary
           'multipart/form-data':
             schema:
               type: object
+              required:
+                - file
               properties:
                 filename:
                   type: string
+                  description: Optional explicit filename. If omitted or empty, the server uses the multipart `file` part filename.
                 origin:
                   type: string
                 extended:
@@ -309,6 +312,7 @@ paths:
                 file:
                   type: string
                   format: binary
+                  description: The binary file to encrypt and save. Its multipart filename is used as fallback when `filename` is missing/empty.
       responses:
         '200':
           description: File stored within the specified bounded nested folder.
@@ -317,7 +321,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/GenericRes'
         '400':
-          description: Invalid vault name, subfolder path, or malformed multipart payload.
+          description: Invalid vault name, subfolder path, malformed multipart payload, or missing filename in both field and file part.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
+        '415':
+          description: Unsupported media type. Content-Type must be multipart/form-data.
           content:
             application/json:
               schema:

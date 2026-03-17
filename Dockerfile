@@ -7,14 +7,14 @@ COPY src ./src
 COPY crates ./crates
 COPY tests ./tests
 
-RUN cargo test && cargo build --release
+RUN cargo test && cargo build --release --bin age-inbox-server
 
 FROM debian:trixie-slim
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /usr/src/app/target/release/age-inbox /usr/local/bin/age-inbox
+COPY --from=builder /usr/src/app/target/release/age-inbox-server /usr/local/bin/age-inbox
 
 RUN mkdir -p /app/vaults
 ENV VAULTS_DIR=/app/vaults

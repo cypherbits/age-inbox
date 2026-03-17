@@ -95,10 +95,15 @@ async fn ordered_full_endpoints_flow() {
     assert!(config.permissions.allow_metadata);
     assert!(config.permissions.allow_lock_unlock);
 
-    // 3) POST /inbox/{name}/upload (raw)
+    // 3) POST /inbox/{name}/upload (multipart)
+    let root_form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(root_payload.clone()).file_name("root.bin"),
+    );
+
     let upload_root_res = client
         .post(format!("{}/inbox/{}/upload", base_url, vault))
-        .body(root_payload.clone())
+        .multipart(root_form)
         .send()
         .await
         .unwrap();

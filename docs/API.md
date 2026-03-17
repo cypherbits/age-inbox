@@ -27,14 +27,18 @@ For a fully interactive schema, explore the OpenAPI 3 specification located in `
 
 - **Upload File (Vault Root)**
   - `POST /inbox/{name}/upload`
-  - Body: Raw binary stream (`application/octet-stream`) OR `multipart/form-data` with a `file` field.
-  - Metadata (`filename`, `origin`, `extended`) must be sent as multipart fields, not HTTP headers.
+  - Body: `multipart/form-data` with a `file` field.
+  - Non-multipart uploads are rejected with `415 Unsupported Media Type`.
+  - Metadata (`filename`, `origin`, `extended`) must be sent as multipart fields, not HTTP headers. If `filename` is missing/empty, the server uses the multipart file part filename.
+  - If no filename can be resolved from either source, upload fails with `400`.
   - *Streams the upload through X25519 encryption and saves `.age` and `.meta.age` files.*
 
 - **Upload File (Subfolder)**
   - `POST /inbox/{name}/upload/{path}`
-  - Body: Raw binary stream (`application/octet-stream`) OR `multipart/form-data` with a `file` field.
-  - Metadata (`filename`, `origin`, `extended`) must be sent as multipart fields, not HTTP headers.
+  - Body: `multipart/form-data` with a `file` field.
+  - Non-multipart uploads are rejected with `415 Unsupported Media Type`.
+  - Metadata (`filename`, `origin`, `extended`) must be sent as multipart fields, not HTTP headers. If `filename` is missing/empty, the server uses the multipart file part filename.
+  - If no filename can be resolved from either source, upload fails with `400`.
   - *Stores encrypted files in a nested path when the `allow_subfolders` permission is enabled.*
 
 - **Unlock Vault**
