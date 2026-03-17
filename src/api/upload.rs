@@ -182,15 +182,18 @@ async fn handle_multipart_upload(
             }
             found_file = true;
 
+            let mut file_bytes_written: u64 = 0;
             while let Some(chunk) = field
                 .chunk()
                 .await
                 .map_err(|e| make_error(StatusCode::BAD_REQUEST, e.to_string()))?
             {
+                file_bytes_written += chunk.len() as u64;
                 futures_util::AsyncWriteExt::write_all(async_writer, &chunk)
                     .await
                     .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
             }
+            metadata.filesize = Some(file_bytes_written);
         } else if field_name == "origin" {
             if let Ok(text) = field.text().await {
                 metadata.origin = Some(text);

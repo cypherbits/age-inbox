@@ -9,6 +9,8 @@ use std::time::Instant;
 use tokio::io::AsyncReadExt;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
+use age_inbox_core::inbox_core::decrypt_age_file_range_to_writer;
+
 use super::{
     config::read_vault_config,
     http_range::{parse_single_range, unsatisfied_content_range},
@@ -26,35 +28,53 @@ fn metadata_path_for(path: &std::path::Path) -> Option<std::path::PathBuf> {
     Some(path.with_file_name(meta_name))
 }
 
-async fn metadata_filename(
+/// Returns (filename, filesize) from the encrypted metadata sidecar.
+async fn metadata_info(
     encrypted_file_path: &std::path::Path,
     identity: &age::x25519::Identity,
-) -> Option<String> {
-    let meta_path = metadata_path_for(encrypted_file_path)?;
+) -> (Option<String>, Option<u64>) {
+    let meta_path = match metadata_path_for(encrypted_file_path) {
+        Some(p) => p,
+        None => return (None, None),
+    };
     if !meta_path.exists() {
-        return None;
+        return (None, None);
     }
 
-    let meta_file = tokio::fs::File::open(meta_path).await.ok()?;
-    let decryptor = Decryptor::new_async(meta_file.compat()).await.ok()?;
-    if decryptor.is_scrypt() {
-        return None;
-    }
+    let meta_file = match tokio::fs::File::open(meta_path).await {
+        Ok(f) => f,
+        Err(_) => return (None, None),
+    };
+    let decryptor = match Decryptor::new_async(meta_file.compat()).await {
+        Ok(d) if !d.is_scrypt() => d,
+        _ => return (None, None),
+    };
 
-    let async_reader = decryptor
+    let async_reader = match decryptor
         .decrypt_async(std::iter::once(identity as &dyn age::Identity))
-        .ok()?;
+    {
+        Ok(r) => r,
+        Err(_) => return (None, None),
+    };
     let mut reader = async_reader.compat();
     let mut bytes = Vec::new();
-    reader.read_to_end(&mut bytes).await.ok()?;
+    if reader.read_to_end(&mut bytes).await.is_err() {
+        return (None, None);
+    }
 
-    let metadata: FileMetadata = serde_json::from_slice(&bytes).ok()?;
-    metadata.filename.and_then(|name| {
-        std::path::Path::new(&name)
+    let metadata: FileMetadata = match serde_json::from_slice(&bytes) {
+        Ok(m) => m,
+        Err(_) => return (None, None),
+    };
+
+    let filename = metadata.filename.as_deref().and_then(|name| {
+        std::path::Path::new(name)
             .file_name()
             .and_then(|n| n.to_str())
             .map(ToString::to_string)
-    })
+    });
+
+    (filename, metadata.filesize)
 }
 
 /// Downloads and decrypts a file from an unlocked vault.
@@ -128,9 +148,8 @@ pub(crate) async fn download_file(
         .map(|n| n.trim_end_matches(".age"))
         .unwrap_or("file");
 
-    let resolved_filename = metadata_filename(&filepath, &identity)
-        .await
-        .unwrap_or_else(|| display_filename.to_string());
+    let (meta_filename, meta_filesize) = metadata_info(&filepath, &identity).await;
+    let resolved_filename = meta_filename.unwrap_or_else(|| display_filename.to_string());
 
     // Check for Range header
     let range_value = headers
@@ -139,46 +158,90 @@ pub(crate) async fn download_file(
         .map(str::to_string);
 
     if let Some(range_header_value) = range_value {
-        // We must decrypt the entire stream and skip/take bytes for the range.
-        let mut reader = async_reader.compat();
-        let mut all_bytes = Vec::new();
-        reader
-            .read_to_end(&mut all_bytes)
-            .await
-            .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        if let Some(total_size) = meta_filesize {
+            // Fast path: filesize known from metadata — stream only the requested range.
+            let (start, end) =
+                if let Some(range) = parse_single_range(&range_header_value, total_size) {
+                    range
+                } else {
+                    let body = Body::from("Range not satisfiable");
+                    let response = Response::builder()
+                        .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                        .header(header::CONTENT_RANGE, unsatisfied_content_range(total_size))
+                        .body(body)
+                        .map_err(|e| {
+                            make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                        })?;
+                    return Ok(response);
+                };
 
-        let total_size = all_bytes.len() as u64;
-        let (start, end) = if let Some(range) = parse_single_range(&range_header_value, total_size) {
-            range
-        } else {
-            let body = Body::from("Range not satisfiable");
-            let response = Response::builder()
-                .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-                .header(header::CONTENT_RANGE, unsatisfied_content_range(total_size))
-                .body(body)
+            let length = end - start + 1;
+            let mut body_bytes = Vec::with_capacity(length as usize);
+            decrypt_age_file_range_to_writer(&identity, &filepath, &mut body_bytes, start, end)
+                .await
                 .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            return Ok(response);
-        };
 
-        let slice = &all_bytes[start as usize..=end as usize];
-        let length = slice.len() as u64;
+            Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_TYPE, content_type)
+                .header(
+                    header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"{}\"", resolved_filename),
+                )
+                .header(header::CONTENT_LENGTH, length.to_string())
+                .header(header::ACCEPT_RANGES, "bytes")
+                .header(
+                    header::CONTENT_RANGE,
+                    format!("bytes {}-{}/{}", start, end, total_size),
+                )
+                .body(Body::from(body_bytes))
+                .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        } else {
+            // Fallback: no filesize in metadata — decrypt entire file to determine total size.
+            let mut reader = async_reader.compat();
+            let mut all_bytes = Vec::new();
+            reader
+                .read_to_end(&mut all_bytes)
+                .await
+                .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-        Response::builder()
-            .status(StatusCode::PARTIAL_CONTENT)
-            .header(header::CONTENT_TYPE, content_type)
-            .header(
-                header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{}\"", resolved_filename),
-            )
-            .header(header::CONTENT_LENGTH, length.to_string())
-            .header(header::ACCEPT_RANGES, "bytes")
-            .header(
-                header::CONTENT_RANGE,
-                format!("bytes {}-{}/{}", start, end, total_size),
-            )
-            .body(Body::from(slice.to_vec()))
-            .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+            let total_size = all_bytes.len() as u64;
+            let (start, end) =
+                if let Some(range) = parse_single_range(&range_header_value, total_size) {
+                    range
+                } else {
+                    let body = Body::from("Range not satisfiable");
+                    let response = Response::builder()
+                        .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                        .header(header::CONTENT_RANGE, unsatisfied_content_range(total_size))
+                        .body(body)
+                        .map_err(|e| {
+                            make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                        })?;
+                    return Ok(response);
+                };
+
+            let slice = &all_bytes[start as usize..=end as usize];
+            let length = slice.len() as u64;
+
+            Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_TYPE, content_type)
+                .header(
+                    header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"{}\"", resolved_filename),
+                )
+                .header(header::CONTENT_LENGTH, length.to_string())
+                .header(header::ACCEPT_RANGES, "bytes")
+                .header(
+                    header::CONTENT_RANGE,
+                    format!("bytes {}-{}/{}", start, end, total_size),
+                )
+                .body(Body::from(slice.to_vec()))
+                .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        }
     } else {
         // No range — stream the full decrypted content
         let stream = tokio_util::io::ReaderStream::new(async_reader.compat());
