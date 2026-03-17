@@ -1,5 +1,5 @@
 use axum::{
-    http::{HeaderName, HeaderValue, Method},
+    http::{header, HeaderName, HeaderValue, Method},
     routing::{get, post},
     Router,
 };
@@ -12,6 +12,7 @@ mod delete;
 mod delete_raw;
 mod download;
 mod download_raw;
+mod http_range;
 mod list_files;
 mod list_files_raw;
 mod lock;
@@ -40,6 +41,12 @@ fn parse_bool(raw: &str) -> bool {
         raw.to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+fn add_if_missing(target: &mut Vec<HeaderName>, required: HeaderName) {
+    if !target.iter().any(|h| h == &required) {
+        target.push(required);
+    }
 }
 
 fn cors_layer_from_env() -> Option<CorsLayer> {
@@ -81,9 +88,13 @@ fn cors_layer_from_env() -> Option<CorsLayer> {
         if headers_raw == "*" {
             cors = cors.allow_headers(Any);
         } else {
-            let headers = parse_csv(&headers_raw)
+            let mut headers = parse_csv(&headers_raw)
                 .filter_map(|h| HeaderName::from_str(h).ok())
                 .collect::<Vec<_>>();
+
+            // Keep Range downloads and multipart/json uploads usable from browsers.
+            add_if_missing(&mut headers, header::CONTENT_TYPE);
+            add_if_missing(&mut headers, header::RANGE);
 
             if !headers.is_empty() {
                 cors = cors.allow_headers(headers);
@@ -92,9 +103,12 @@ fn cors_layer_from_env() -> Option<CorsLayer> {
     }
 
     if let Some(expose_raw) = env_var("CORS_EXPOSE_HEADERS") {
-        let expose_headers = parse_csv(&expose_raw)
+        let mut expose_headers = parse_csv(&expose_raw)
             .filter_map(|h| HeaderName::from_str(h).ok())
             .collect::<Vec<_>>();
+        add_if_missing(&mut expose_headers, header::CONTENT_DISPOSITION);
+        add_if_missing(&mut expose_headers, header::CONTENT_RANGE);
+        add_if_missing(&mut expose_headers, header::ACCEPT_RANGES);
         if !expose_headers.is_empty() {
             cors = cors.expose_headers(expose_headers);
         }

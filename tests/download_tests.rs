@@ -191,3 +191,102 @@ async fn download_range_returns_partial_content() {
     let partial = range_response.text().await.unwrap();
     assert_eq!(partial, "hello");
 }
+
+/// Out-of-bounds range requests return 416 with unsatisfied Content-Range.
+#[tokio::test]
+async fn download_range_unsatisfied_returns_416() {
+    let (base_url, _dir) = common::setup_app().await;
+    let client = reqwest::Client::new();
+    common::create_vault(&client, &base_url, true).await;
+
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(b"abc".to_vec()).file_name("tiny.txt"),
+    );
+
+    let upload = client
+        .post(format!("{}/inbox/testvault/upload", base_url))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    common::unlock_vault(&client, &base_url, "mypassword").await;
+
+    let list = client
+        .get(format!("{}/inbox/testvault/list", base_url))
+        .send()
+        .await
+        .unwrap();
+    let files: Vec<ListedFile> = list.json().await.unwrap();
+    let data_file = files
+        .iter()
+        .map(|f| f.path.clone())
+        .find(|f| f.ends_with(".age") && !f.ends_with(".meta.age"))
+        .unwrap();
+
+    let response = client
+        .get(format!("{}/inbox/testvault/download/{}", base_url, data_file))
+        .header("Range", "bytes=100-200")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|h| h.to_str().ok()),
+        Some("bytes */3")
+    );
+}
+
+/// Open-ended ranges (bytes=start-) return partial content from start to end.
+#[tokio::test]
+async fn download_range_open_ended_returns_partial_content() {
+    let (base_url, _dir) = common::setup_app().await;
+    let client = reqwest::Client::new();
+    common::create_vault(&client, &base_url, true).await;
+
+    let original_content = b"hello world for range test!";
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(original_content.to_vec()).file_name("open-ended.txt"),
+    );
+
+    let upload = client
+        .post(format!("{}/inbox/testvault/upload", base_url))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    common::unlock_vault(&client, &base_url, "mypassword").await;
+
+    let list = client
+        .get(format!("{}/inbox/testvault/list", base_url))
+        .send()
+        .await
+        .unwrap();
+    let files: Vec<ListedFile> = list.json().await.unwrap();
+    let data_file = files
+        .iter()
+        .map(|f| f.path.clone())
+        .find(|f| f.ends_with(".age") && !f.ends_with(".meta.age"))
+        .unwrap();
+
+    let response = client
+        .get(format!("{}/inbox/testvault/download/{}", base_url, data_file))
+        .header("Range", "bytes=6-")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    let partial = response.text().await.unwrap();
+    assert_eq!(partial, "world for range test!");
+}
+

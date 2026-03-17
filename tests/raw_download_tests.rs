@@ -116,6 +116,108 @@ async fn raw_download_range_request() {
     assert_eq!(&range_body[..], &full_body[..10]);
 }
 
+/// Raw download returns 416 for out-of-bounds ranges.
+#[tokio::test]
+async fn raw_download_unsatisfied_range_returns_416() {
+    let (base_url, _dir) = common::setup_app().await;
+    let client = reqwest::Client::new();
+    common::create_vault(&client, &base_url, true).await;
+
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(b"abc".to_vec()).file_name("tiny.bin"),
+    );
+
+    let upload = client
+        .post(format!("{}/inbox/testvault/upload", base_url))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    let list = client
+        .get(format!("{}/inbox/testvault/raw/list", base_url))
+        .send()
+        .await
+        .unwrap();
+    let files: Vec<serde_json::Value> = list.json().await.unwrap();
+    let file_path = files[0]["path"].as_str().unwrap().to_string();
+
+    let response = client
+        .get(format!(
+            "{}/inbox/testvault/raw/download/{}",
+            base_url, file_path
+        ))
+        .header("Range", "bytes=9999999-10000000")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    let content_range = response
+        .headers()
+        .get("content-range")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    assert!(content_range.starts_with("bytes */"));
+}
+
+/// Raw download supports suffix ranges (bytes=-N).
+#[tokio::test]
+async fn raw_download_suffix_range_request() {
+    let (base_url, _dir) = common::setup_app().await;
+    let client = reqwest::Client::new();
+    common::create_vault(&client, &base_url, true).await;
+
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(b"range test data for raw download".to_vec())
+            .file_name("suffix.bin"),
+    );
+
+    let upload = client
+        .post(format!("{}/inbox/testvault/upload", base_url))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::OK);
+
+    let list = client
+        .get(format!("{}/inbox/testvault/raw/list", base_url))
+        .send()
+        .await
+        .unwrap();
+    let files: Vec<serde_json::Value> = list.json().await.unwrap();
+    let file_path = files[0]["path"].as_str().unwrap().to_string();
+
+    let full = client
+        .get(format!(
+            "{}/inbox/testvault/raw/download/{}",
+            base_url, file_path
+        ))
+        .send()
+        .await
+        .unwrap();
+    let full_body = full.bytes().await.unwrap();
+
+    let response = client
+        .get(format!(
+            "{}/inbox/testvault/raw/download/{}",
+            base_url, file_path
+        ))
+        .header("Range", "bytes=-12")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    let partial = response.bytes().await.unwrap();
+    assert_eq!(partial.len(), 12);
+    assert_eq!(&partial[..], &full_body[full_body.len() - 12..]);
+}
+
 /// Raw download returns 404 for non-existent vault.
 #[tokio::test]
 async fn raw_download_vault_not_found() {
