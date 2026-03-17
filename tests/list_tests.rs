@@ -55,7 +55,11 @@ async fn list_returns_uploaded_files() {
     assert!(!files.is_empty());
     assert!(files.iter().all(|entry| entry.path.ends_with(".age")));
     assert!(files.iter().all(|entry| !entry.path.ends_with(".meta.age")));
-    assert!(files.iter().any(|entry| entry.filename.as_deref() == Some("root.txt")));
-    assert!(files.iter().any(|entry| entry.origin.as_deref() == Some("unit-test")));
+    assert!(files
+        .iter()
+        .any(|entry| entry.filename.as_deref() == Some("root.txt")));
+    assert!(files
+        .iter()
+        .any(|entry| entry.origin.as_deref() == Some("unit-test")));
     assert!(files.iter().all(|entry| entry.size > 0));
 }

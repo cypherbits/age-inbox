@@ -45,4 +45,3 @@ fn routes_do_not_use_legacy_axum_syntax() {
         );
     }
 }
-

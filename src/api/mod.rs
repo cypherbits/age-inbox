@@ -1,6 +1,6 @@
 use axum::{
-    routing::{get, post},
     http::{HeaderName, HeaderValue, Method},
+    routing::{get, post},
     Router,
 };
 use std::{env, str::FromStr, time::Duration};
@@ -36,7 +36,10 @@ fn parse_csv(raw: &str) -> impl Iterator<Item = &str> {
 }
 
 fn parse_bool(raw: &str) -> bool {
-    matches!(raw.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    matches!(
+        raw.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 fn cors_layer_from_env() -> Option<CorsLayer> {
@@ -51,7 +54,9 @@ fn cors_layer_from_env() -> Option<CorsLayer> {
             .collect::<Vec<_>>();
 
         if origins.is_empty() {
-            tracing::warn!("CORS_ALLOWED_ORIGINS is set but contains no valid origins; CORS disabled");
+            tracing::warn!(
+                "CORS_ALLOWED_ORIGINS is set but contains no valid origins; CORS disabled"
+            );
             return None;
         }
 
@@ -120,13 +125,31 @@ pub fn router(state: AppState) -> Router {
         .route("/inbox/{name}/unlock", post(unlock::unlock))
         .route("/inbox/{name}/lock", post(lock::lock))
         .route("/inbox/{name}/list", get(list_files::list_files))
-        .route("/inbox/{name}/download/{*path}", get(download::download_file))
-        .route("/inbox/{name}/metadata/{*path}", get(metadata::download_metadata))
-        .route("/inbox/{name}/delete/{*path}", axum::routing::delete(delete::delete_file))
+        .route(
+            "/inbox/{name}/download/{*path}",
+            get(download::download_file),
+        )
+        .route(
+            "/inbox/{name}/metadata/{*path}",
+            get(metadata::download_metadata),
+        )
+        .route(
+            "/inbox/{name}/delete/{*path}",
+            axum::routing::delete(delete::delete_file),
+        )
         // Raw endpoints (work without vault unlock)
-        .route("/inbox/{name}/raw/list", get(list_files_raw::list_files_raw))
-        .route("/inbox/{name}/raw/download/{*path}", get(download_raw::download_raw))
-        .route("/inbox/{name}/raw/delete/{*path}", axum::routing::delete(delete_raw::delete_raw))
+        .route(
+            "/inbox/{name}/raw/list",
+            get(list_files_raw::list_files_raw),
+        )
+        .route(
+            "/inbox/{name}/raw/download/{*path}",
+            get(download_raw::download_raw),
+        )
+        .route(
+            "/inbox/{name}/raw/delete/{*path}",
+            axum::routing::delete(delete_raw::delete_raw),
+        )
         .with_state(state);
 
     if let Some(cors) = cors_layer_from_env() {

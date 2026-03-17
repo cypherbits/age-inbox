@@ -5,13 +5,13 @@ use axum::{
     http::{header, HeaderMap, StatusCode},
     response::Response,
 };
-use tokio::io::AsyncReadExt;
 use std::time::Instant;
+use tokio::io::AsyncReadExt;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
 use super::{
     config::read_vault_config,
-    types::{make_error, ApiError, AppState, FileMetadata, permission_denied},
+    types::{make_error, permission_denied, ApiError, AppState, FileMetadata},
     validation::{is_valid_name, is_valid_subpath},
 };
 
@@ -48,14 +48,12 @@ async fn metadata_filename(
     reader.read_to_end(&mut bytes).await.ok()?;
 
     let metadata: FileMetadata = serde_json::from_slice(&bytes).ok()?;
-    metadata
-        .filename
-        .and_then(|name| {
-            std::path::Path::new(&name)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(ToString::to_string)
-        })
+    metadata.filename.and_then(|name| {
+        std::path::Path::new(&name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(ToString::to_string)
+    })
 }
 
 /// Parses a single-range `Range: bytes=start-end` header.
@@ -193,7 +191,9 @@ pub(crate) async fn download_file(
             }
             (total_size - suffix_len, total_size - 1)
         } else {
-            let end = range_end.map(|e| e.min(total_size - 1)).unwrap_or(total_size - 1);
+            let end = range_end
+                .map(|e| e.min(total_size - 1))
+                .unwrap_or(total_size - 1);
             if range_start >= total_size {
                 return Err(make_error(
                     StatusCode::RANGE_NOT_SATISFIABLE,

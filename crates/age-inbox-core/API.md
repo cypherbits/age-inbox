@@ -201,12 +201,11 @@ Reads `.inbox-age.config` from `vault_dir`.
 pub async fn write_vault_config_file(
     vault_dir: &Path,
     inbox_name: &str,
-    public_key: &str,
-    allow_subfolders: bool,
+    config: &VaultConfig,
 ) -> Result<(), InboxCoreError>
 ```
 
-Writes `.inbox-age.config` with `inbox-name`, `public-key`, and serialized `permissions`.
+Writes `.inbox-age.config` with `inbox-name`, `config.public_key`, and serialized `config.permissions`.
 
 ## Vault Lifecycle APIs
 
@@ -217,7 +216,7 @@ pub async fn create_vault(
     vaults_dir: &Path,
     name: &str,
     password: String,
-    allow_subfolders: bool,
+    permissions: VaultPermissions,
 ) -> Result<CreateVaultResult, InboxCoreError>
 ```
 
@@ -361,6 +360,7 @@ Decrypts an AGE metadata sidecar and parses the JSON into `FileMetadata`.
 use age_inbox_core::inbox_core::{
     create_vault, decrypt_age_file_to_writer, encrypt_reader_to_age_file,
     get_unlocked_identity, read_vault_config_file, unlock_vault, UnlockedVault,
+    VaultPermissions,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -374,7 +374,9 @@ async fn main() -> anyhow::Result<()> {
     // Session state is owned here, not inside age-inbox-core
     let unlocked: RwLock<HashMap<String, UnlockedVault>> = RwLock::new(HashMap::new());
 
-    let created = create_vault(vaults_dir, "demo", "secret".to_string(), false).await?;
+    let mut permissions = VaultPermissions::default();
+    permissions.allow_subfolders = false;
+    let created = create_vault(vaults_dir, "demo", "secret".to_string(), permissions).await?;
     println!("public key: {}", created.public_key);
 
     // Caller acquires the lock and passes &mut map to the library

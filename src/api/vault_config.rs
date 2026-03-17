@@ -28,8 +28,6 @@ pub(crate) async fn get_vault_config(
     let config = read_vault_config(&vault_dir).await?;
 
     Ok(Json(VaultConfigRes {
-        permissions: serde_json::to_value(&config.permissions)
-            .unwrap_or(serde_json::json!({})),
+        permissions: serde_json::to_value(&config.permissions).unwrap_or(serde_json::json!({})),
     }))
 }
-

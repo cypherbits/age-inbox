@@ -7,7 +7,7 @@ use axum::{
 use super::{
     config::read_vault_config,
     list_files::walk_dir,
-    types::{make_error, ApiError, AppState, RawListedFile, permission_denied},
+    types::{make_error, permission_denied, ApiError, AppState, RawListedFile},
     validation::is_valid_name,
 };
 

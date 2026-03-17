@@ -1,14 +1,14 @@
+use crate::inbox_core::{unlock_vault, InboxCoreError};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
 use std::time::Duration;
-use crate::inbox_core::{InboxCoreError, unlock_vault};
 
 use super::{
     config::read_vault_config,
-    types::{make_error, ApiError, AppState, GenericRes, UnlockReq, permission_denied},
+    types::{make_error, permission_denied, ApiError, AppState, GenericRes, UnlockReq},
     validation::is_valid_name,
 };
 
@@ -17,9 +17,9 @@ fn map_core_error(err: InboxCoreError) -> ApiError {
         InboxCoreError::InvalidName => make_error(StatusCode::BAD_REQUEST, "Invalid vault name"),
         InboxCoreError::VaultNotFound => make_error(StatusCode::NOT_FOUND, "Vault not found"),
         InboxCoreError::InvalidPassword => make_error(StatusCode::UNAUTHORIZED, "Invalid password"),
-        InboxCoreError::Io(msg)
-        | InboxCoreError::Crypto(msg)
-        | InboxCoreError::Serialize(msg) => make_error(StatusCode::INTERNAL_SERVER_ERROR, msg),
+        InboxCoreError::Io(msg) | InboxCoreError::Crypto(msg) | InboxCoreError::Serialize(msg) => {
+            make_error(StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
         other => make_error(StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
     }
 }

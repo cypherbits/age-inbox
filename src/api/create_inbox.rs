@@ -1,18 +1,48 @@
+use crate::inbox_core::{create_vault, InboxCoreError, VaultPermissions};
 use axum::{extract::State, http::StatusCode, Json};
-use crate::inbox_core::{InboxCoreError, create_vault};
 
 use super::{
     types::{make_error, ApiError, AppState, CreateInboxReq, CreateInboxRes},
     validation::is_valid_name,
 };
 
+fn build_permissions(payload: &CreateInboxReq) -> VaultPermissions {
+    let mut permissions = VaultPermissions::default();
+
+    if let Some(custom) = &payload.permissions {
+        if let Some(value) = custom.allow_subfolders {
+            permissions.allow_subfolders = value;
+        }
+        if let Some(value) = custom.allow_upload {
+            permissions.allow_upload = value;
+        }
+        if let Some(value) = custom.allow_download {
+            permissions.allow_download = value;
+        }
+        if let Some(value) = custom.allow_list {
+            permissions.allow_list = value;
+        }
+        if let Some(value) = custom.allow_delete {
+            permissions.allow_delete = value;
+        }
+        if let Some(value) = custom.allow_metadata {
+            permissions.allow_metadata = value;
+        }
+        if let Some(value) = custom.allow_lock_unlock {
+            permissions.allow_lock_unlock = value;
+        }
+    }
+
+    permissions
+}
+
 fn map_core_error(err: InboxCoreError) -> ApiError {
     match err {
         InboxCoreError::InvalidName => make_error(StatusCode::BAD_REQUEST, "Invalid vault name"),
         InboxCoreError::VaultExists => make_error(StatusCode::CONFLICT, "Vault already exists"),
-        InboxCoreError::Io(msg)
-        | InboxCoreError::Crypto(msg)
-        | InboxCoreError::Serialize(msg) => make_error(StatusCode::INTERNAL_SERVER_ERROR, msg),
+        InboxCoreError::Io(msg) | InboxCoreError::Crypto(msg) | InboxCoreError::Serialize(msg) => {
+            make_error(StatusCode::INTERNAL_SERVER_ERROR, msg)
+        }
         other => make_error(StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
     }
 }
@@ -31,11 +61,13 @@ pub(crate) async fn create_inbox(
         return Err(make_error(StatusCode::CONFLICT, "Vault already exists"));
     }
 
+    let permissions = build_permissions(&payload);
+
     let created = create_vault(
         &state.vaults_dir,
         &payload.name,
         payload.password,
-        payload.allow_subfolders.unwrap_or(false),
+        permissions,
     )
     .await
     .map_err(map_core_error)?;

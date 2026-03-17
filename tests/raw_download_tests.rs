@@ -36,7 +36,10 @@ async fn raw_download_without_unlock() {
 
     // Download raw (encrypted) — should work without unlock
     let response = client
-        .get(format!("{}/inbox/testvault/raw/download/{}", base_url, file_path))
+        .get(format!(
+            "{}/inbox/testvault/raw/download/{}",
+            base_url, file_path
+        ))
         .send()
         .await
         .unwrap();
@@ -87,7 +90,10 @@ async fn raw_download_range_request() {
 
     // Full download to know total size
     let full = client
-        .get(format!("{}/inbox/testvault/raw/download/{}", base_url, file_path))
+        .get(format!(
+            "{}/inbox/testvault/raw/download/{}",
+            base_url, file_path
+        ))
         .send()
         .await
         .unwrap();
@@ -95,7 +101,10 @@ async fn raw_download_range_request() {
 
     // Partial range request
     let range_response = client
-        .get(format!("{}/inbox/testvault/raw/download/{}", base_url, file_path))
+        .get(format!(
+            "{}/inbox/testvault/raw/download/{}",
+            base_url, file_path
+        ))
         .header("Range", "bytes=0-9")
         .send()
         .await
@@ -114,7 +123,10 @@ async fn raw_download_vault_not_found() {
     let client = reqwest::Client::new();
 
     let response = client
-        .get(format!("{}/inbox/nonexistent/raw/download/test.age", base_url))
+        .get(format!(
+            "{}/inbox/nonexistent/raw/download/test.age",
+            base_url
+        ))
         .send()
         .await
         .unwrap();

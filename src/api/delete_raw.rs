@@ -5,7 +5,7 @@ use axum::{
 
 use super::{
     config::read_vault_config,
-    types::{make_error, ApiError, AppState, permission_denied},
+    types::{make_error, permission_denied, ApiError, AppState},
     validation::{is_valid_name, is_valid_subpath},
 };
 
@@ -66,4 +66,3 @@ pub(crate) async fn delete_raw(
 
     Ok(StatusCode::OK)
 }
-

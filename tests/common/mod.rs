@@ -28,12 +28,28 @@ pub async fn setup_app() -> (String, tempfile::TempDir) {
 
 /// Creates a vault with default password for tests.
 pub async fn create_vault(client: &reqwest::Client, base_url: &str, allow_subfolders: bool) {
+    create_vault_with_permissions(
+        client,
+        base_url,
+        json!({
+            "allow_subfolders": allow_subfolders,
+        }),
+    )
+    .await;
+}
+
+/// Creates a vault with explicit permissions payload for tests.
+pub async fn create_vault_with_permissions(
+    client: &reqwest::Client,
+    base_url: &str,
+    permissions: serde_json::Value,
+) {
     let response = client
         .post(format!("{}/inbox", base_url))
         .json(&json!({
             "name": "testvault",
             "password": "mypassword",
-            "allow_subfolders": allow_subfolders
+            "permissions": permissions
         }))
         .send()
         .await

@@ -14,8 +14,7 @@ async fn raw_delete_file_removes_file_and_metadata() {
         .text("filename", "test.txt")
         .part(
             "file",
-            reqwest::multipart::Part::bytes(b"test content".to_vec())
-                .file_name("test.txt"),
+            reqwest::multipart::Part::bytes(b"test content".to_vec()).file_name("test.txt"),
         );
 
     let upload = client
@@ -43,7 +42,10 @@ async fn raw_delete_file_removes_file_and_metadata() {
 
     // Delete the file using raw endpoint (without unlocking)
     let delete = client
-        .delete(format!("{}/inbox/testvault/raw/delete/{}", base_url, file_path))
+        .delete(format!(
+            "{}/inbox/testvault/raw/delete/{}",
+            base_url, file_path
+        ))
         .send()
         .await
         .unwrap();
@@ -71,8 +73,7 @@ async fn raw_delete_file_works_when_locked() {
         .text("filename", "test.txt")
         .part(
             "file",
-            reqwest::multipart::Part::bytes(b"test content".to_vec())
-                .file_name("test.txt"),
+            reqwest::multipart::Part::bytes(b"test content".to_vec()).file_name("test.txt"),
         );
 
     let upload = client
@@ -100,7 +101,10 @@ async fn raw_delete_file_works_when_locked() {
 
     // Delete while vault is locked (should work for raw endpoint)
     let delete = client
-        .delete(format!("{}/inbox/testvault/raw/delete/{}", base_url, file_path))
+        .delete(format!(
+            "{}/inbox/testvault/raw/delete/{}",
+            base_url, file_path
+        ))
         .send()
         .await
         .unwrap();
@@ -125,7 +129,10 @@ async fn raw_delete_file_returns_404_when_not_found() {
 
     // Try to delete non-existent file
     let delete = client
-        .delete(format!("{}/inbox/testvault/raw/delete/nonexistent.age", base_url))
+        .delete(format!(
+            "{}/inbox/testvault/raw/delete/nonexistent.age",
+            base_url
+        ))
         .send()
         .await
         .unwrap();
@@ -144,8 +151,7 @@ async fn raw_delete_file_removes_metadata() {
         .text("filename", "test.txt")
         .part(
             "file",
-            reqwest::multipart::Part::bytes(b"test content".to_vec())
-                .file_name("test.txt"),
+            reqwest::multipart::Part::bytes(b"test content".to_vec()).file_name("test.txt"),
         );
 
     let upload = client
@@ -175,7 +181,10 @@ async fn raw_delete_file_removes_metadata() {
 
     // Delete the file (should also delete metadata)
     let delete = client
-        .delete(format!("{}/inbox/testvault/raw/delete/{}", base_url, file_path))
+        .delete(format!(
+            "{}/inbox/testvault/raw/delete/{}",
+            base_url, file_path
+        ))
         .send()
         .await
         .unwrap();
@@ -191,4 +200,3 @@ async fn raw_delete_file_removes_metadata() {
     assert!(!files_after.iter().any(|f| f.path == file_path));
     assert!(!files_after.iter().any(|f| f.path == metadata_path));
 }
-

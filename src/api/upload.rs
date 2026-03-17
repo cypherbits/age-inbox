@@ -1,7 +1,4 @@
-use age::{
-    x25519::Recipient,
-    Encryptor,
-};
+use age::{x25519::Recipient, Encryptor};
 use axum::{
     body::Body,
     extract::{Path, Request, State},
@@ -16,7 +13,7 @@ use age_inbox_core::inbox_core::{generate_drop_filename, metadata_sidecar_for};
 
 use super::{
     config::read_vault_config,
-    types::{make_error, ApiError, AppState, FileMetadata, GenericRes, permission_denied},
+    types::{make_error, permission_denied, ApiError, AppState, FileMetadata, GenericRes},
     validation::{is_valid_name, is_valid_subpath},
 };
 
@@ -87,8 +84,8 @@ async fn handle_upload(
 
     let drop_name = generate_drop_filename();
     let filepath = target_dir.join(&drop_name);
-    let meta_filepath = metadata_sidecar_for(&filepath)
-        .expect("generated filename is a valid .age path");
+    let meta_filepath =
+        metadata_sidecar_for(&filepath).expect("generated filename is a valid .age path");
 
     let file = tokio::fs::File::create(&filepath)
         .await
@@ -123,7 +120,8 @@ async fn handle_upload(
         .await
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let meta_encryptor =
-        Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient)).expect("we provided a recipient");
+        Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
+            .expect("we provided a recipient");
     let mut meta_writer = meta_encryptor
         .wrap_async_output(meta_file.compat_write())
         .await

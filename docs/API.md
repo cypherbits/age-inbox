@@ -6,7 +6,23 @@ For a fully interactive schema, explore the OpenAPI 3 specification located in `
 
 - **Create Inbox**
   - `POST /inbox`
-  - Body: `{"name": "myvault", "password": "super-secret", "allow_subfolders": false}`
+  - Body:
+    ```json
+    {
+      "name": "myvault",
+      "password": "super-secret",
+      "permissions": {
+        "allow_subfolders": false,
+        "allow_upload": true,
+        "allow_download": true,
+        "allow_list": true,
+        "allow_delete": true,
+        "allow_metadata": true,
+        "allow_lock_unlock": true
+      }
+    }
+    ```
+  - `permissions` is optional and supports partial overrides; omitted fields use defaults.
   - *Generates a new `.inbox-age.config` with the vault's derived public footprint.*
 
 - **Upload File (Vault Root)**
