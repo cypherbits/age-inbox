@@ -30,41 +30,114 @@ fn metadata_path_for(path: &std::path::Path) -> Option<std::path::PathBuf> {
 
 /// Returns (filename, filesize) from the encrypted metadata sidecar.
 async fn metadata_info(
+    vault_name: &str,
+    relative_path: &str,
     encrypted_file_path: &std::path::Path,
     identity: &age::x25519::Identity,
 ) -> (Option<String>, Option<u64>) {
     let meta_path = match metadata_path_for(encrypted_file_path) {
         Some(p) => p,
-        None => return (None, None),
+        None => {
+            tracing::warn!(
+                vault = %vault_name,
+                file = %relative_path,
+                "Invalid encrypted file path for metadata sidecar",
+            );
+            return (None, None);
+        }
     };
-    if !meta_path.exists() {
-        return (None, None);
+
+    match tokio::fs::metadata(&meta_path).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::warn!(
+                vault = %vault_name,
+                file = %relative_path,
+                "Metadata sidecar not found; download will use fallback metadata",
+            );
+            return (None, None);
+        }
+        Err(e) => {
+            tracing::error!(
+                vault = %vault_name,
+                file = %relative_path,
+                error = %e,
+                "Failed to stat metadata sidecar",
+            );
+            return (None, None);
+        }
     }
 
     let meta_file = match tokio::fs::File::open(meta_path).await {
         Ok(f) => f,
-        Err(_) => return (None, None),
+        Err(e) => {
+            tracing::error!(
+                vault = %vault_name,
+                file = %relative_path,
+                error = %e,
+                "Failed to open metadata sidecar",
+            );
+            return (None, None);
+        }
     };
     let decryptor = match Decryptor::new_async(meta_file.compat()).await {
         Ok(d) if !d.is_scrypt() => d,
-        _ => return (None, None),
+        Ok(_) => {
+            tracing::error!(
+                vault = %vault_name,
+                file = %relative_path,
+                "Metadata sidecar uses unsupported scrypt encryption",
+            );
+            return (None, None);
+        }
+        Err(e) => {
+            tracing::error!(
+                vault = %vault_name,
+                file = %relative_path,
+                error = %e,
+                "Failed to initialize metadata decryptor",
+            );
+            return (None, None);
+        }
     };
 
     let async_reader = match decryptor
         .decrypt_async(std::iter::once(identity as &dyn age::Identity))
     {
         Ok(r) => r,
-        Err(_) => return (None, None),
+        Err(e) => {
+            tracing::error!(
+                vault = %vault_name,
+                file = %relative_path,
+                error = %e,
+                "Failed to decrypt metadata sidecar",
+            );
+            return (None, None);
+        }
     };
     let mut reader = async_reader.compat();
     let mut bytes = Vec::new();
-    if reader.read_to_end(&mut bytes).await.is_err() {
+    if let Err(e) = reader.read_to_end(&mut bytes).await {
+        tracing::error!(
+            vault = %vault_name,
+            file = %relative_path,
+            error = %e,
+            "Failed to read decrypted metadata sidecar",
+        );
         return (None, None);
     }
 
     let metadata: FileMetadata = match serde_json::from_slice(&bytes) {
         Ok(m) => m,
-        Err(_) => return (None, None),
+        Err(e) => {
+            tracing::error!(
+                vault = %vault_name,
+                file = %relative_path,
+                error = %e,
+                "Failed to parse metadata JSON",
+            );
+            return (None, None);
+        }
     };
 
     let filename = metadata.filename.as_deref().and_then(|name| {
@@ -127,18 +200,39 @@ pub(crate) async fn download_file(
 
     let decryptor = match Decryptor::new_async(fs_file.compat()).await {
         Ok(d) if d.is_scrypt() => {
+            tracing::error!(
+                vault = %name,
+                file = %path,
+                "Encrypted payload uses unsupported scrypt encryption",
+            );
             return Err(make_error(
                 StatusCode::BAD_REQUEST,
                 "Passphrase encryption not supported",
             ))
         }
         Ok(d) => d,
-        Err(e) => return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => {
+            tracing::error!(
+                vault = %name,
+                file = %path,
+                error = %e,
+                "Failed to initialize payload decryptor",
+            );
+            return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+        }
     };
 
     let async_reader = decryptor
         .decrypt_async(std::iter::once(&identity as &dyn age::Identity))
-        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| {
+            tracing::error!(
+                vault = %name,
+                file = %path,
+                error = %e,
+                "Failed to decrypt payload",
+            );
+            make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        })?;
 
     let content_type = "application/octet-stream";
 
@@ -148,7 +242,7 @@ pub(crate) async fn download_file(
         .map(|n| n.trim_end_matches(".age"))
         .unwrap_or("file");
 
-    let (meta_filename, meta_filesize) = metadata_info(&filepath, &identity).await;
+    let (meta_filename, meta_filesize) = metadata_info(&name, &path, &filepath, &identity).await;
     let resolved_filename = meta_filename.unwrap_or_else(|| display_filename.to_string());
 
     // Check for Range header
@@ -164,6 +258,13 @@ pub(crate) async fn download_file(
                 if let Some(range) = parse_single_range(&range_header_value, total_size) {
                     range
                 } else {
+                    tracing::warn!(
+                        vault = %name,
+                        file = %path,
+                        range = %range_header_value,
+                        total_size,
+                        "Invalid or unsatisfiable range request",
+                    );
                     let body = Body::from("Range not satisfiable");
                     let response = Response::builder()
                         .status(StatusCode::RANGE_NOT_SATISFIABLE)
@@ -199,6 +300,11 @@ pub(crate) async fn download_file(
                 .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
         } else {
             // Fallback: no filesize in metadata — decrypt entire file to determine total size.
+            tracing::warn!(
+                vault = %name,
+                file = %path,
+                "Missing metadata filesize; decrypting full file for range response",
+            );
             let mut reader = async_reader.compat();
             let mut all_bytes = Vec::new();
             reader
@@ -211,6 +317,13 @@ pub(crate) async fn download_file(
                 if let Some(range) = parse_single_range(&range_header_value, total_size) {
                     range
                 } else {
+                    tracing::warn!(
+                        vault = %name,
+                        file = %path,
+                        range = %range_header_value,
+                        total_size,
+                        "Invalid or unsatisfiable range request",
+                    );
                     let body = Body::from("Range not satisfiable");
                     let response = Response::builder()
                         .status(StatusCode::RANGE_NOT_SATISFIABLE)

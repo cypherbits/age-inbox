@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::Instant;
 use tokio::io::AsyncReadExt;
@@ -56,8 +57,26 @@ pub(crate) async fn list_files(
         let size = tokio::fs::metadata(&full_path)
             .await
             .map(|m| m.len())
-            .unwrap_or(0);
-        let (filename, origin) = read_metadata_fields(&full_path, &identity).await;
+            .map_err(|e| {
+                make_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to read encrypted file metadata for '{}': {}", relative_path, e),
+                )
+            })?;
+        let (filename, origin) = read_metadata_fields(&name, &relative_path, &full_path, &identity)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    vault = %name,
+                    file = %relative_path,
+                    error = %e,
+                    "Metadata sidecar decryption failed during list",
+                );
+                make_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to decrypt metadata for '{}'", relative_path),
+                )
+            })?;
         listed.push(ListedFile {
             path: relative_path,
             filename,
@@ -80,40 +99,79 @@ fn metadata_path_for(path: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 
 async fn read_metadata_fields(
+    vault_name: &str,
+    relative_path: &str,
     encrypted_file_path: &std::path::Path,
     identity: &age::x25519::Identity,
-) -> (Option<String>, Option<String>) {
+) -> Result<(Option<String>, Option<String>), String> {
     let Some(meta_path) = metadata_path_for(encrypted_file_path) else {
-        return (None, None);
+        return Err("invalid encrypted file path for metadata sidecar".to_string());
     };
-    if !meta_path.exists() {
-        return (None, None);
+
+    match tokio::fs::metadata(&meta_path).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            tracing::warn!(
+                vault = %vault_name,
+                file = %relative_path,
+                sidecar = %meta_path.to_string_lossy(),
+                "Metadata sidecar not found; returning file with filesystem size only",
+            );
+            return Ok((None, None));
+        }
+        Err(e) => {
+            return Err(format!(
+                "failed to stat metadata sidecar '{}': {}",
+                meta_path.to_string_lossy(),
+                e
+            ));
+        }
     }
 
-    let Ok(meta_file) = tokio::fs::File::open(meta_path).await else {
-        return (None, None);
-    };
-    let Ok(decryptor) = Decryptor::new_async(meta_file.compat()).await else {
-        return (None, None);
-    };
+    let meta_file = tokio::fs::File::open(&meta_path)
+        .await
+        .map_err(|e| format!("failed to open metadata sidecar '{}': {}", meta_path.to_string_lossy(), e))?;
+    let decryptor = Decryptor::new_async(meta_file.compat()).await.map_err(|e| {
+        format!(
+            "failed to initialize metadata decryptor for '{}': {}",
+            meta_path.to_string_lossy(),
+            e
+        )
+    })?;
     if decryptor.is_scrypt() {
-        return (None, None);
+        return Err(format!(
+            "metadata sidecar '{}' uses unsupported scrypt encryption",
+            meta_path.to_string_lossy()
+        ));
     }
 
-    let Ok(async_reader) = decryptor.decrypt_async(std::iter::once(identity as &dyn age::Identity))
-    else {
-        return (None, None);
-    };
+    let async_reader = decryptor
+        .decrypt_async(std::iter::once(identity as &dyn age::Identity))
+        .map_err(|e| {
+            format!(
+                "failed to decrypt metadata sidecar '{}': {}",
+                meta_path.to_string_lossy(),
+                e
+            )
+        })?;
 
     let mut reader = async_reader.compat();
     let mut bytes = Vec::new();
-    if reader.read_to_end(&mut bytes).await.is_err() {
-        return (None, None);
-    }
+    reader.read_to_end(&mut bytes).await.map_err(|e| {
+        format!(
+            "failed to read decrypted metadata sidecar '{}': {}",
+            meta_path.to_string_lossy(),
+            e
+        )
+    })?;
 
-    let Ok(metadata) = serde_json::from_slice::<FileMetadata>(&bytes) else {
-        return (None, None);
-    };
+    let metadata = serde_json::from_slice::<FileMetadata>(&bytes).map_err(|e| {
+        format!(
+            "failed to parse metadata JSON from '{}': {}",
+            meta_path.to_string_lossy(),
+            e
+        )
+    })?;
 
     let filename = metadata.filename.and_then(|name| {
         std::path::Path::new(&name)
@@ -122,7 +180,7 @@ async fn read_metadata_fields(
             .map(ToString::to_string)
     });
 
-    (filename, metadata.origin)
+    Ok((filename, metadata.origin))
 }
 
 pub(crate) async fn walk_dir(root: PathBuf) -> Result<Vec<String>, String> {
