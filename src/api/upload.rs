@@ -85,7 +85,36 @@ async fn handle_upload(
     let meta_filepath =
         metadata_sidecar_for(&filepath).expect("generated filename is a valid .age path");
 
-    let file = tokio::fs::File::create(&filepath)
+    let filepath_tmp = target_dir.join(format!("{}.tmp", drop_name));
+    let meta_filepath_tmp = target_dir.join(format!(
+        "{}.tmp",
+        meta_filepath.file_name().unwrap().to_string_lossy()
+    ));
+
+    struct CleanupGuard {
+        paths: Vec<std::path::PathBuf>,
+        success: bool,
+    }
+    impl Drop for CleanupGuard {
+        fn drop(&mut self) {
+            if !self.success {
+                for path in &self.paths {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+    }
+
+    let mut guard = CleanupGuard {
+        paths: vec![meta_filepath_tmp.clone(), filepath_tmp.clone()],
+        success: false,
+    };
+
+    let meta_file = tokio::fs::File::create(&meta_filepath_tmp)
+        .await
+        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let file = tokio::fs::File::create(&filepath_tmp)
         .await
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let encryptor = Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
@@ -117,9 +146,6 @@ async fn handle_upload(
         .await
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let meta_file = tokio::fs::File::create(&meta_filepath)
-        .await
-        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let meta_encryptor =
         Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
             .expect("we provided a recipient");
@@ -138,6 +164,16 @@ async fn handle_upload(
     futures_util::AsyncWriteExt::close(&mut meta_writer)
         .await
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    tokio::fs::rename(&meta_filepath_tmp, &meta_filepath)
+        .await
+        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save metadata: {}", e)))?;
+        
+    tokio::fs::rename(&filepath_tmp, &filepath)
+        .await
+        .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save file: {}", e)))?;
+
+    guard.success = true;
 
     let uploaded_path = if let Some(p) = subpath {
         format!("{}/{}", p, drop_name)
