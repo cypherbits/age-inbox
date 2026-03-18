@@ -42,6 +42,12 @@ pub(crate) async fn list_files_raw(
         }
 
         let full_path = state.vaults_dir.join(&name).join(&relative_path);
+        let meta_path = full_path.with_extension("meta.age");
+        if !meta_path.exists() {
+            tracing::warn!("Metadata sidecar not found for '{}', skipping file in list", relative_path);
+            continue;
+        }
+
         let size = tokio::fs::metadata(&full_path)
             .await
             .map(|m| m.len())

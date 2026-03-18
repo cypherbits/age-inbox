@@ -34,7 +34,7 @@ async fn metadata_info(
     relative_path: &str,
     encrypted_file_path: &std::path::Path,
     identity: &age::x25519::Identity,
-) -> (Option<String>, Option<u64>) {
+) -> Result<(Option<String>, Option<u64>), ApiError> {
     let meta_path = match metadata_path_for(encrypted_file_path) {
         Some(p) => p,
         None => {
@@ -43,19 +43,19 @@ async fn metadata_info(
                 file = %relative_path,
                 "Invalid encrypted file path for metadata sidecar",
             );
-            return (None, None);
+            return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, "Invalid path for metadata"));
         }
     };
 
     match tokio::fs::metadata(&meta_path).await {
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            tracing::warn!(
+            tracing::error!(
                 vault = %vault_name,
                 file = %relative_path,
-                "Metadata sidecar not found; download will use fallback metadata",
+                "Metadata sidecar not found",
             );
-            return (None, None);
+            return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, "Metadata sidecar not found"));
         }
         Err(e) => {
             tracing::error!(
@@ -64,7 +64,7 @@ async fn metadata_info(
                 error = %e,
                 "Failed to stat metadata sidecar",
             );
-            return (None, None);
+            return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to stat metadata"));
         }
     }
 
@@ -77,7 +77,7 @@ async fn metadata_info(
                 error = %e,
                 "Failed to open metadata sidecar",
             );
-            return (None, None);
+            return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to open metadata"));
         }
     };
     let decryptor = match Decryptor::new_async(meta_file.compat()).await {
@@ -88,7 +88,7 @@ async fn metadata_info(
                 file = %relative_path,
                 "Metadata sidecar uses unsupported scrypt encryption",
             );
-            return (None, None);
+            return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, "Metadata uses scrypt"));
         }
         Err(e) => {
             tracing::error!(
@@ -97,7 +97,7 @@ async fn metadata_info(
                 error = %e,
                 "Failed to initialize metadata decryptor",
             );
-            return (None, None);
+            return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to init metadata decryptor"));
         }
     };
 
@@ -112,7 +112,7 @@ async fn metadata_info(
                 error = %e,
                 "Failed to decrypt metadata sidecar",
             );
-            return (None, None);
+            return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decrypt metadata"));
         }
     };
     let mut reader = async_reader.compat();
@@ -124,7 +124,7 @@ async fn metadata_info(
             error = %e,
             "Failed to read decrypted metadata sidecar",
         );
-        return (None, None);
+        return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to read metadata"));
     }
 
     let metadata: FileMetadata = match serde_json::from_slice(&bytes) {
@@ -136,7 +136,7 @@ async fn metadata_info(
                 error = %e,
                 "Failed to parse metadata JSON",
             );
-            return (None, None);
+            return Err(make_error(StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse metadata"));
         }
     };
 
@@ -147,7 +147,7 @@ async fn metadata_info(
             .map(ToString::to_string)
     });
 
-    (filename, metadata.filesize)
+    Ok((filename, metadata.filesize))
 }
 
 /// Downloads and decrypts a file from an unlocked vault.
@@ -242,7 +242,7 @@ pub(crate) async fn download_file(
         .map(|n| n.trim_end_matches(".age"))
         .unwrap_or("file");
 
-    let (meta_filename, meta_filesize) = metadata_info(&name, &path, &filepath, &identity).await;
+    let (meta_filename, meta_filesize) = metadata_info(&name, &path, &filepath, &identity).await?;
     let resolved_filename = meta_filename.unwrap_or_else(|| display_filename.to_string());
 
     // Check for Range header

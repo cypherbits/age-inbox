@@ -67,9 +67,9 @@ async fn download_returns_decrypted_file() {
     assert_eq!(downloaded.text().await.unwrap(), "hello world raw!");
 }
 
-/// Download still works when metadata sidecar is missing (fallback path).
+/// Download fails when metadata sidecar is missing
 #[tokio::test]
-async fn download_without_metadata_sidecar_still_works() {
+async fn download_without_metadata_sidecar_fails() {
     let (base_url, dir) = common::setup_app().await;
     let client = reqwest::Client::new();
     common::create_vault(&client, &base_url, true).await;
@@ -113,8 +113,7 @@ async fn download_without_metadata_sidecar_still_works() {
         .await
         .unwrap();
 
-    assert_eq!(downloaded.status(), StatusCode::OK);
-    assert_eq!(downloaded.bytes().await.unwrap().to_vec(), payload);
+    assert_eq!(downloaded.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 /// If metadata sidecar is missing, Range requests still return partial content.
@@ -164,8 +163,7 @@ async fn download_without_metadata_sidecar_with_range_returns_partial_content() 
         .await
         .unwrap();
 
-    assert_eq!(downloaded.status(), StatusCode::PARTIAL_CONTENT);
-    assert_eq!(downloaded.bytes().await.unwrap().to_vec(), b"range".to_vec());
+    assert_eq!(downloaded.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 /// Metadata is exposed via dedicated endpoint and metadata sidecars are rejected by download.

@@ -220,6 +220,18 @@ async fn ordered_full_endpoints_flow_e2e() {
     let download_body = download_res.bytes().await.unwrap();
     assert_eq!(download_body.to_vec(), sub_payload);
 
+    let root_download_res = client
+        .get(format!(
+            "{}/inbox/{}/download/{}",
+            server.base_url, vault, root_file_path
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(root_download_res.status(), StatusCode::OK);
+    let root_download_body = root_download_res.bytes().await.unwrap();
+    assert_eq!(root_download_body.to_vec(), root_payload);
+
     let metadata_res = client
         .get(format!(
             "{}/inbox/{}/metadata/{}",
@@ -269,6 +281,57 @@ async fn ordered_full_endpoints_flow_e2e() {
         .unwrap();
     assert_eq!(delete_res.status(), StatusCode::OK);
 
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn e2e_file_content_integrity_test() {
+    let mut server = common::spawn_server().await;
+    let client = reqwest::Client::new();
+    let vault = "integrityvault";
+    let password = "mypassword";
+
+    client.post(format!("{}/inbox", server.base_url))
+        .json(&serde_json::json!({
+            "name": vault,
+            "password": password,
+            "permissions": { "allow_subfolders": true }
+        }))
+        .send().await.unwrap();
+
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("empty.txt", vec![]),
+        ("small.bin", b"hello world".to_vec()),
+        ("large.bin", vec![0x42; 1024 * 50]),
+        ("special_chars-@#$.txt", b"nasty name".to_vec()),
+    ];
+
+    for (name, payload) in &cases {
+        let form = reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(payload.clone()).file_name(name.to_string()),
+        );
+        client.post(format!("{}/inbox/{}/upload", server.base_url, vault))
+            .multipart(form).send().await.unwrap();
+    }
+
+    client.post(format!("{}/inbox/{}/unlock", server.base_url, vault))
+        .json(&serde_json::json!({ "password": password }))
+        .send().await.unwrap();
+
+    let list_res = client.get(format!("{}/inbox/{}/list", server.base_url, vault))
+        .send().await.unwrap();
+    let listed = list_res.json::<Vec<ListedFile>>().await.unwrap();
+
+    for (name, payload) in cases {
+        let file_path = listed.iter().find(|f| f.filename.as_deref() == Some(name))
+            .map(|f| f.path.clone()).unwrap();
+        let download_res = client.get(format!("{}/inbox/{}/download/{}", server.base_url, vault, file_path))
+            .send().await.unwrap();
+        let downloaded_bytes = download_res.bytes().await.unwrap().to_vec();
+        assert_eq!(downloaded_bytes, payload, "Payload mismatch for {}", name);
+    }
+    
     server.shutdown().await;
 }
 
