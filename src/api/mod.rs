@@ -1,4 +1,5 @@
 use axum::{
+    extract::DefaultBodyLimit,
     http::{header, HeaderName, HeaderValue, Method},
     routing::{get, post},
     Router,
@@ -30,6 +31,12 @@ fn env_var(name: &str) -> Option<String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+fn get_max_body_size() -> usize {
+    env_var("MAX_UPLOAD_SIZE_BYTES")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1024 * 1024 * 1024) // 1GB default
 }
 
 fn parse_csv(raw: &str) -> impl Iterator<Item = &str> {
@@ -164,6 +171,8 @@ pub fn router(state: AppState) -> Router {
             "/inbox/{name}/raw/delete/{*path}",
             axum::routing::delete(delete_raw::delete_raw),
         )
+
+        .layer(DefaultBodyLimit::max(get_max_body_size()))
         .with_state(state);
 
     if let Some(cors) = cors_layer_from_env() {
