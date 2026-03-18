@@ -40,11 +40,13 @@ async fn handle_upload(
     req: Request,
 ) -> Result<Json<GenericRes>, ApiError> {
     if !is_valid_name(&name) {
+        tracing::warn!(vault = %name, "Invalid vault name on upload request");
         return Err(make_error(StatusCode::BAD_REQUEST, "Invalid vault name"));
     }
 
     let vault_dir = state.vaults_dir.join(&name);
     if !vault_dir.exists() {
+        tracing::warn!(vault = %name, "Vault not found on upload request");
         return Err(make_error(StatusCode::NOT_FOUND, "Vault not found"));
     }
 
@@ -52,6 +54,7 @@ async fn handle_upload(
 
     // Check upload permission
     if !config.permissions.allow_upload {
+        tracing::warn!(vault = %name, "Upload denied by vault config permissions");
         return Err(permission_denied());
     }
 
@@ -59,12 +62,14 @@ async fn handle_upload(
 
     if let Some(ref p) = subpath {
         if !config.permissions.allow_subfolders {
+            tracing::warn!(vault = %name, subpath = %p, "Subfolders not allowed by vault config");
             return Err(make_error(
                 StatusCode::FORBIDDEN,
                 "Subfolders not allowed by vault config",
             ));
         }
         if !is_valid_subpath(p) {
+            tracing::warn!(vault = %name, subpath = %p, "Invalid subfolder path on upload request");
             return Err(make_error(
                 StatusCode::BAD_REQUEST,
                 "Invalid subfolder path",
@@ -74,11 +79,17 @@ async fn handle_upload(
         target_dir = target_dir.join(p);
         tokio::fs::create_dir_all(&target_dir)
             .await
-            .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            .map_err(|e| {
+                tracing::error!(vault = %name, subpath = %p, error = %e, "Failed to create subfolder");
+                make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            })?;
     }
 
     let recipient = Recipient::from_str(&config.public_key)
-        .map_err(|_| make_error(StatusCode::INTERNAL_SERVER_ERROR, "Invalid public key"))?;
+        .map_err(|e| {
+            tracing::error!(vault = %name, error = %e, "Invalid public key in vault config");
+            make_error(StatusCode::INTERNAL_SERVER_ERROR, "Invalid public key")
+        })?;
 
     let drop_name = generate_drop_filename();
     let filepath = target_dir.join(&drop_name);
@@ -131,6 +142,7 @@ async fn handle_upload(
         .is_some_and(|s| s.starts_with("multipart/form-data"));
 
     if !is_multipart {
+        tracing::warn!(vault = %name, "Upload request missing multipart/form-data content type");
         return Err(make_error(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "Content-Type must be multipart/form-data",
@@ -180,6 +192,8 @@ async fn handle_upload(
     } else {
         drop_name
     };
+
+    tracing::info!(vault = %name, file = %uploaded_path, "File uploaded successfully");
 
     Ok(Json(GenericRes {
         message: format!("File {} uploaded successfully", uploaded_path),
@@ -255,6 +269,7 @@ async fn handle_multipart_upload(
     }
 
     if !found_file {
+        tracing::warn!("Upload request missing 'file' field in multipart form");
         return Err(make_error(
             StatusCode::BAD_REQUEST,
             "Missing 'file' field in multipart form",
@@ -263,6 +278,7 @@ async fn handle_multipart_upload(
 
     metadata.filename = form_filename.or(multipart_file_name);
     if metadata.filename.is_none() {
+        tracing::warn!("Upload request missing filename");
         return Err(make_error(
             StatusCode::BAD_REQUEST,
             "Missing filename: provide non-empty 'filename' field or a filename in the multipart file part",
