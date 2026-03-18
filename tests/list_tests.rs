@@ -69,9 +69,9 @@ async fn list_returns_uploaded_files() {
     assert!(files.iter().all(|entry| entry.size > 0));
 }
 
-/// List endpoint keeps listing files (with size) when sidecar metadata is missing.
+/// List endpoint fails when sidecar metadata is missing.
 #[tokio::test]
-async fn list_warns_and_falls_back_when_metadata_is_missing() {
+async fn list_fails_when_metadata_is_missing() {
     let (base_url, dir) = common::setup_app().await;
     let client = reqwest::Client::new();
     common::create_vault(&client, &base_url, true).await;
@@ -120,13 +120,7 @@ async fn list_warns_and_falls_back_when_metadata_is_missing() {
         .send()
         .await
         .unwrap();
-    assert_eq!(list.status(), StatusCode::OK);
-
-    let files: Vec<ListedFile> = list.json().await.unwrap();
-    assert_eq!(files.len(), 1);
-    assert_eq!(files[0].filename, None);
-    assert_eq!(files[0].origin, None);
-    assert!(files[0].size > 0);
+    assert_eq!(list.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 /// List endpoint fails when metadata decryption/parsing fails.

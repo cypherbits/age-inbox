@@ -111,13 +111,13 @@ async fn read_metadata_fields(
     match tokio::fs::metadata(&meta_path).await {
         Ok(_) => {}
         Err(e) if e.kind() == ErrorKind::NotFound => {
-            tracing::warn!(
+            tracing::error!(
                 vault = %vault_name,
                 file = %relative_path,
                 sidecar = %meta_path.to_string_lossy(),
-                "Metadata sidecar not found; returning file with filesystem size only",
+                "Metadata sidecar not found",
             );
-            return Ok((None, None));
+            return Err("metadata sidecar not found".to_string());
         }
         Err(e) => {
             return Err(format!(
