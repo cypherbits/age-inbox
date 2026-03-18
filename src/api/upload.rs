@@ -209,7 +209,10 @@ async fn handle_multipart_upload(
 
     let mut multipart = axum::extract::Multipart::from_request(req, state)
         .await
-        .map_err(|e| make_error(StatusCode::BAD_REQUEST, format!("Invalid multipart: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!(error = %e, "Invalid multipart format or body limit exceeded");
+            make_error(StatusCode::BAD_REQUEST, format!("Invalid multipart: {}", e))
+        })?;
 
     let mut metadata = FileMetadata::default();
     let mut multipart_file_name: Option<String> = None;
@@ -219,7 +222,10 @@ async fn handle_multipart_upload(
     while let Some(mut field) = multipart
         .next_field()
         .await
-        .map_err(|e| make_error(StatusCode::BAD_REQUEST, e.to_string()))?
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to read multipart field");
+            make_error(StatusCode::BAD_REQUEST, e.to_string())
+        })?
     {
         let field_name = field.name().unwrap_or("").to_string();
 
@@ -236,7 +242,10 @@ async fn handle_multipart_upload(
             while let Some(chunk) = field
                 .chunk()
                 .await
-                .map_err(|e| make_error(StatusCode::BAD_REQUEST, e.to_string()))?
+                .map_err(|e| {
+                    tracing::error!(error = %e, "Failed to read multipart chunk");
+                    make_error(StatusCode::BAD_REQUEST, e.to_string())
+                })?
             {
                 file_bytes_written += chunk.len() as u64;
                 futures_util::AsyncWriteExt::write_all(async_writer, &chunk)
@@ -244,27 +253,47 @@ async fn handle_multipart_upload(
                     .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
             }
             metadata.filesize = Some(file_bytes_written);
-        } else if field_name == "origin" {
-            if let Ok(text) = field.text().await {
-                metadata.origin = Some(text);
+        } else {
+            // Read other fields as text with a size limit to avoid OOM
+            let mut text_bytes = Vec::new();
+            let mut overflow = false;
+            while let Some(chunk) = field.chunk().await.map_err(|e| {
+                tracing::error!(error = %e, field = %field_name, "Failed to read non-file multipart chunk");
+                make_error(StatusCode::BAD_REQUEST, e.to_string())
+            })? {
+                if text_bytes.len() + chunk.len() > 64 * 1024 {
+                    overflow = true;
+                    tracing::warn!(field = %field_name, "Non-file field exceeded 64KB limit, rejecting upload");
+                    break;
+                }
+                text_bytes.extend_from_slice(&chunk);
             }
-        } else if field_name == "filename" {
-            if let Ok(text) = field.text().await {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    form_filename = Some(trimmed.to_string());
+            
+            if overflow {
+                return Err(make_error(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    format!("Field '{}' exceeds the 64KB limit", field_name),
+                ));
+            }
+
+            if let Ok(text) = String::from_utf8(text_bytes) {
+                if field_name == "origin" {
+                    metadata.origin = Some(text);
+                } else if field_name == "filename" {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        form_filename = Some(trimmed.to_string());
+                    }
+                } else if field_name == "extended" {
+                    if let Ok(ext_map) = serde_json::from_str(&text) {
+                        metadata.extended = ext_map;
+                    }
+                } else if !field_name.is_empty() {
+                    metadata
+                        .extended
+                        .insert(field_name, serde_json::Value::String(text));
                 }
             }
-        } else if field_name == "extended" {
-            if let Ok(text) = field.text().await {
-                if let Ok(ext_map) = serde_json::from_str(&text) {
-                    metadata.extended = ext_map;
-                }
-            }
-        } else if let Ok(text) = field.text().await {
-            metadata
-                .extended
-                .insert(field_name, serde_json::Value::String(text));
         }
     }
 

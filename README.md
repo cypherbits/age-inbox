@@ -95,6 +95,7 @@ The server supports CORS and logging configuration via environment variables.
 - `CORS_EXPOSE_HEADERS` (optional): Comma-separated response headers exposed to browsers.
 - `CORS_ALLOW_CREDENTIALS` (optional): `true/false` (also accepts `1/0`, `yes/no`, `on/off`).
 - `CORS_MAX_AGE_SECS` (optional): Preflight cache max age in seconds.
+- `MAX_UPLOAD_SIZE_BYTES` (optional): Maximum file upload size in bytes. Defaults to `1073741824` (1 GB) if not provided.
 - `RUST_LOG` (optional): Log filter for `tracing` output. Common values: `error`, `warn`, `info`, `debug`, `trace`. You can also use per-module filters, e.g. `age_inbox=debug,tower_http=info`.
 
 Example:
@@ -105,6 +106,7 @@ CORS_ALLOWED_METHODS=GET,POST,OPTIONS \
 CORS_ALLOWED_HEADERS=content-type,x-file-origin,x-filename,x-extended-metadata \
 CORS_ALLOW_CREDENTIALS=false \
 CORS_MAX_AGE_SECS=600 \
+MAX_UPLOAD_SIZE_BYTES=2147483648 \
 RUST_LOG=info \
 cargo run --release
 ```
