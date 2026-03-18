@@ -69,9 +69,9 @@ async fn list_returns_uploaded_files() {
     assert!(files.iter().all(|entry| entry.size > 0));
 }
 
-/// List endpoint fails when sidecar metadata is missing.
+/// List endpoint skips file when sidecar metadata is missing.
 #[tokio::test]
-async fn list_fails_when_metadata_is_missing() {
+async fn list_skips_when_metadata_is_missing() {
     let (base_url, dir) = common::setup_app().await;
     let client = reqwest::Client::new();
     common::create_vault(&client, &base_url, true).await;
@@ -120,12 +120,14 @@ async fn list_fails_when_metadata_is_missing() {
         .send()
         .await
         .unwrap();
-    assert_eq!(list.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(list.status(), StatusCode::OK);
+    let out_files: Vec<ListedFile> = list.json().await.unwrap();
+    assert!(out_files.is_empty(), "The file shouldn't be listed when metadata is missing");
 }
 
-/// List endpoint fails when metadata decryption/parsing fails.
+/// List endpoint skips file when metadata decryption/parsing fails.
 #[tokio::test]
-async fn list_errors_when_metadata_sidecar_is_corrupted() {
+async fn list_skips_when_metadata_sidecar_is_corrupted() {
     let (base_url, dir) = common::setup_app().await;
     let client = reqwest::Client::new();
     common::create_vault(&client, &base_url, true).await;
@@ -174,6 +176,8 @@ async fn list_errors_when_metadata_sidecar_is_corrupted() {
         .send()
         .await
         .unwrap();
-    assert_eq!(list.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(list.status(), StatusCode::OK);
+    let out_files: Vec<ListedFile> = list.json().await.unwrap();
+    assert!(out_files.is_empty(), "The file shouldn't be listed when metadata is corrupted");
 }
 

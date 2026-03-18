@@ -63,20 +63,19 @@ pub(crate) async fn list_files(
                     format!("Failed to read encrypted file metadata for '{}': {}", relative_path, e),
                 )
             })?;
-        let (filename, origin) = read_metadata_fields(&name, &relative_path, &full_path, &identity)
-            .await
-            .map_err(|e| {
+        let meta_result = read_metadata_fields(&name, &relative_path, &full_path, &identity).await;
+        let (filename, origin) = match meta_result {
+            Ok(res) => res,
+            Err(e) => {
                 tracing::error!(
                     vault = %name,
                     file = %relative_path,
                     error = %e,
-                    "Metadata sidecar decryption failed during list",
+                    "Metadata sidecar missing or decryption failed; skipping file in list",
                 );
-                make_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to decrypt metadata for '{}'", relative_path),
-                )
-            })?;
+                continue;
+            }
+        };
         listed.push(ListedFile {
             path: relative_path,
             filename,
