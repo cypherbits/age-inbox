@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use futures_util::stream::StreamExt;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -47,41 +48,56 @@ pub(crate) async fn list_files(
         .await
         .map_err(|e| make_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    let mut listed = Vec::new();
-    for relative_path in files {
+    let futures = files.into_iter().filter_map(|relative_path| {
         if !relative_path.ends_with(".age") || relative_path.ends_with(".meta.age") {
-            continue;
+            return None;
         }
 
-        let full_path = state.vaults_dir.join(&name).join(&relative_path);
-        let size = tokio::fs::metadata(&full_path)
-            .await
-            .map(|m| m.len())
-            .map_err(|e| {
-                make_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to read encrypted file metadata for '{}': {}", relative_path, e),
-                )
-            })?;
-        let meta_result = read_metadata_fields(&name, &relative_path, &full_path, &identity).await;
-        let (filename, origin) = match meta_result {
-            Ok(res) => res,
-            Err(e) => {
-                tracing::error!(
-                    vault = %name,
-                    file = %relative_path,
-                    error = %e,
-                    "Metadata sidecar missing or decryption failed; skipping file in list",
-                );
-                continue;
-            }
-        };
-        listed.push(ListedFile {
-            path: relative_path,
-            filename,
-            origin,
-            size,
-        });
+        let name = name.clone();
+        let state_vaults_dir = state.vaults_dir.clone();
+        let identity = identity.clone();
+
+        Some(async move {
+            let full_path = state_vaults_dir.join(&name).join(&relative_path);
+            let size = tokio::fs::metadata(&full_path)
+                .await
+                .map(|m| m.len())
+                .map_err(|e| {
+                    make_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to read encrypted file metadata for '{}': {}", relative_path, e),
+                    )
+                })?;
+            let meta_result = read_metadata_fields(&name, &relative_path, &full_path, &identity).await;
+            let (filename, origin) = match meta_result {
+                Ok(res) => res,
+                Err(e) => {
+                    tracing::error!(
+                        vault = %name,
+                        file = %relative_path,
+                        error = %e,
+                        "Metadata sidecar missing or decryption failed; skipping file in list",
+                    );
+                    return Ok(None);
+                }
+            };
+            Ok(Some(ListedFile {
+                path: relative_path,
+                filename,
+                origin,
+                size,
+            }))
+        })
+    });
+
+    let stream = futures_util::stream::iter(futures).buffer_unordered(5);
+    let results: Vec<_> = stream.collect().await;
+
+    let mut listed = Vec::new();
+    for res in results {
+        if let Some(file) = res? {
+            listed.push(file);
+        }
     }
 
     Ok(Json(listed))

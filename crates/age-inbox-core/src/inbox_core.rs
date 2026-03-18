@@ -308,7 +308,7 @@ pub async fn encrypt_reader_to_age_file<R: AsyncRead + Unpin>(
         .map_err(|e| InboxCoreError::Crypto(e.to_string()))?;
 
     let mut written = 0u64;
-    let mut buffer = [0u8; 16 * 1024];
+    let mut buffer = vec![0u8; 128 * 1024];
     loop {
         let n = reader
             .read(&mut buffer)
