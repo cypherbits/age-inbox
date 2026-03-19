@@ -63,13 +63,23 @@ pub(crate) async fn create_inbox(
 
     let permissions = build_permissions(&payload);
 
-    let created = create_vault(
-        &state.vaults_dir,
-        &payload.name,
-        payload.password,
-        permissions,
-    )
+    let vaults_dir = state.vaults_dir.clone();
+    let name_clone = payload.name.clone();
+    
+    let created = tokio::task::spawn_blocking(move || {
+        let handle = tokio::runtime::Handle::current();
+        handle.block_on(async {
+            create_vault(
+                &vaults_dir,
+                &name_clone,
+                payload.password,
+                permissions,
+            )
+            .await
+        })
+    })
     .await
+    .unwrap()
     .map_err(map_core_error)?;
 
     Ok(Json(CreateInboxRes {

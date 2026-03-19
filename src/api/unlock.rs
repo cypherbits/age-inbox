@@ -42,16 +42,28 @@ pub(crate) async fn unlock(
         return Err(permission_denied());
     }
 
-    let mut vaults = state.unlocked_vaults.write().await;
-    unlock_vault(
-        &mut *vaults,
-        &state.vaults_dir,
-        &name,
-        payload.password,
-        Duration::from_secs(3600),
-    )
+    let vaults_dir = state.vaults_dir.clone();
+    let name_clone = name.clone();
+    
+    let mut vaults = state.unlocked_vaults.write_owned().await;
+    let (_vaults, res) = tokio::task::spawn_blocking(move || {
+        let handle = tokio::runtime::Handle::current();
+        let res = handle.block_on(async {
+            unlock_vault(
+                &mut *vaults,
+                &vaults_dir,
+                &name_clone,
+                payload.password,
+                Duration::from_secs(3600),
+            )
+            .await
+        });
+        (vaults, res)
+    })
     .await
-    .map_err(map_core_error)?;
+    .unwrap();
+
+    res.map_err(map_core_error)?;
 
     Ok(Json(GenericRes {
         message: format!("Vault {} unlocked for 1 hour", name),
