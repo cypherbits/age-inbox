@@ -130,6 +130,17 @@ Run it with:
 cargo test --test e2e_tests -- --test-threads=1
 ```
 
+## Benchmarks
+
+The core library (`age-inbox-core`) uses `criterion` for statistical performance tracking of the low-level encrypt/decrypt and vault operation logic. This ensures that any refactoring on the stream I/O doesn't cause regressions. 
+
+To run the full suite locally and generate HTML performance reports, execute:
+
+```bash
+cargo bench -p age-inbox-core
+```
+Detailed metrics and plots (e.g., changes compared to the previous run) will be available in `target/criterion/report/index.html`. For deep CPU or memory profiling, consider running `samply record cargo bench -p age-inbox-core`.
+
 ### Certificate Pinning
 
 Since the API generates a steady `cert.pem` on its first run (and uses it for all subsequent runs), you can implement **Certificate Pinning** on your clients. Pinning the exact public key or certificate hash of this `cert.pem` protects against Man-in-the-Middle (MITM) attacks.
