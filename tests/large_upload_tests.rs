@@ -1,4 +1,3 @@
-use axum::{body::Body, http::StatusCode};
 mod common;
 
 #[tokio::test]
