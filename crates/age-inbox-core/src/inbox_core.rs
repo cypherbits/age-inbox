@@ -346,7 +346,8 @@ pub async fn decrypt_age_file_to_writer<W: AsyncWrite + Unpin>(
         .await
         .map_err(|e| InboxCoreError::Io(e.to_string()))?;
 
-    let decryptor = Decryptor::new_async(fs_file.compat())
+    let buffered_file = tokio::io::BufReader::new(fs_file).compat();
+    let decryptor = Decryptor::new_async_buffered(buffered_file)
         .await
         .map_err(|e| InboxCoreError::Crypto(e.to_string()))?;
 
@@ -382,7 +383,8 @@ pub async fn decrypt_age_file_range_to_writer<W: AsyncWrite + Unpin>(
         .await
         .map_err(|e| InboxCoreError::Io(e.to_string()))?;
 
-    let decryptor = Decryptor::new_async(fs_file.compat())
+    let buffered_file = tokio::io::BufReader::new(fs_file).compat();
+    let decryptor = Decryptor::new_async_buffered(buffered_file)
         .await
         .map_err(|e| InboxCoreError::Crypto(e.to_string()))?;
 
@@ -398,12 +400,13 @@ pub async fn decrypt_age_file_range_to_writer<W: AsyncWrite + Unpin>(
 
     let compat_reader = async_reader.compat();
 
-    // Skip `start` bytes by draining into sink (decrypts only chunks up to `start`)
-    let mut skip_reader = compat_reader.take(start);
+    // Skip `start` bytes by draining into sink (decrypts only chunks up to `start`).
+    // BufReader with 64 KB capacity matches the age STREAM chunk size, minimizing syscalls.
+    let mut skip_reader = tokio::io::BufReader::with_capacity(64 * 1024, compat_reader.take(start));
     tokio::io::copy(&mut skip_reader, &mut tokio::io::sink())
         .await
         .map_err(|e| InboxCoreError::Io(e.to_string()))?;
-    let compat_reader = skip_reader.into_inner();
+    let compat_reader = skip_reader.into_inner().into_inner();
 
     // Copy only the requested range bytes to writer
     let bytes_to_read = end - start + 1;
