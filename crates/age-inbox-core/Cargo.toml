@@ -21,4 +21,9 @@ bech32 = "0.11.1"
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tempfile = "3.8"
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "crypto_benches"
+harness = false
 
