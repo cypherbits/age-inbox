@@ -4,13 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       pr:
-        description: "Numero de la PR a verificar (ej. 32 o #32)"
+        description: "PR number to verify (e.g. 32 or #32)"
         required: true
         type: string
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -26,7 +29,7 @@ jobs:
           set -euo pipefail
           PR="${PR_INPUT#\#}"
           if [[ ! "$PR" =~ ^[0-9]+$ ]]; then
-            echo "Numero de PR invalido: $PR_INPUT"
+            echo "Invalid PR number: $PR_INPUT"
             exit 1
           fi
           gh pr checkout "$PR"
@@ -52,3 +55,20 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --locked
+
+      - name: Report result on PR
+        if: ${{ always() }}
+        env:
+          PR_INPUT: ${{ github.event.inputs.pr }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          PR="${PR_INPUT#\#}"
+          SHA="$(git rev-parse --short HEAD)"
+          if [ "$JOB_STATUS" = "success" ]; then
+            gh pr comment "$PR" --body "✅ **PR Check** passed on \`$SHA\`: it builds and all tests pass. Ready to merge. ([log]($RUN_URL))"
+            gh pr edit "$PR" --add-label "verified" || true
+          else
+            gh pr comment "$PR" --body "❌ **PR Check** failed on \`$SHA\`. Review the result before merging. ([log]($RUN_URL))"
+          fi
