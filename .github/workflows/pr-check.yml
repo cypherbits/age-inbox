@@ -1,0 +1,54 @@
+name: PR Check (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Numero de la PR a verificar (ej. 32 o #32)"
+        required: true
+        type: string
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Checkout PR branch
+        env:
+          PR_INPUT: ${{ github.event.inputs.pr }}
+        run: |
+          set -euo pipefail
+          PR="${PR_INPUT#\#}"
+          if [[ ! "$PR" =~ ^[0-9]+$ ]]; then
+            echo "Numero de PR invalido: $PR_INPUT"
+            exit 1
+          fi
+          gh pr checkout "$PR"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build (workspace, all targets)
+        run: cargo build --workspace --all-targets --locked
+
+      - name: Run tests
+        run: cargo test --workspace --locked
