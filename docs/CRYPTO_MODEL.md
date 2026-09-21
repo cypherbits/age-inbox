@@ -117,7 +117,8 @@ When data is received for a vault:
 
 1. The stored public key is loaded from `.inbox-age.config`.
 2. An `age` encryptor is created for that recipient.
-3. Content is streamed directly into the encryptor and written to disk in 128 KiB chunks.
+3. Content is streamed straight into the encryptor and written to disk as it arrives, without
+   buffering the whole payload.
 4. Metadata is serialized to JSON and encrypted with the same recipient into a sidecar.
 
 This keeps memory usage stable for large files and avoids buffering full payloads in RAM. The server

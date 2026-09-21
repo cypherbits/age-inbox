@@ -294,16 +294,12 @@ why the file is a hot path (one small read per request).
 ### Metadata semantics
 
 `FileMetadata` is `{ filename, origin, filesize, ...extended }` where `extended` is flattened into
-the JSON object. Be aware of two different meanings of `filesize`:
-
-| Source | `filesize` meaning |
-|--------|--------------------|
-| Sidecar written by upload | **Plaintext** byte count of the uploaded file |
-| `GET /inbox/{name}/metadata/{path}` | **Ciphertext** size on disk (the handler overwrites the sidecar value) |
-| `size` in `GET .../list` and `.../raw/list` | **Ciphertext** size on disk |
-
-Range responses are computed from the sidecar value (plaintext) because byte ranges apply to
-decrypted content. This split is a known inconsistency; see [`PROTOCOL.md`](PROTOCOL.md#9-size-and-range-semantics).
+the JSON object. Be aware that `filesize` does **not** mean the same thing everywhere: the sidecar
+records the **plaintext** byte count, while `GET /inbox/{name}/metadata/{path}` and the `size` field
+of the listing endpoints report the **ciphertext** size on disk. Range responses use the sidecar
+(plaintext) value because byte ranges apply to decrypted content. The full table lives in
+[`PROTOCOL.md` §9](PROTOCOL.md#9-size-and-range-semantics); the split is a known inconsistency,
+tracked in [§8](#8-known-gaps).
 
 ## 6. Concurrency, streaming and memory
 

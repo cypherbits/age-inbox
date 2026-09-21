@@ -19,8 +19,8 @@ the **naming and session semantics layered on top of REST**.
 | Control messages | `application/json` |
 | Uploads | `multipart/form-data` |
 | File bodies | `application/octet-stream` |
-| Error bodies | `application/json` → `{ "error": "<message>" }` (see [§7](#7-error-model)) |
-| Authentication | None at the transport layer; read access is gated by an in-memory unlock session |
+| Error bodies | `application/json` → `{ "error": "<message>" }` for handler errors (see [§7](#7-error-model)); extractor rejections and `416` are plain text |
+| Authentication | None at the transport layer; read and delete access is gated by an in-memory unlock session |
 | Idempotency | None; committing operations (upload, delete) are not idempotent |
 
 The examples below use `http://localhost:3000` and `jq` for readability.
@@ -571,8 +571,8 @@ plaintext size at upload time. Ciphertext size is always strictly larger than pl
   A client disconnect mid-upload leaves no `drop-*.age` file behind (only the ephemeral `.tmp`, which
   is cleaned up on the error path).
 - **Sidecar-before-payload ordering.** The metadata sidecar is renamed first. A crash between the two
-  renames can leave a sidecar without a payload; such a file is skipped by `list`/`raw/list` because
-  no matching `.age` exists.
+  renames leaves an orphan `.meta.age` with no payload; both `list` and `raw/list` only consider
+  `.age` payloads, so it is never returned.
 - **No cross-request transactions.** Concurrent uploads are independent and use random names, so they
   do not collide.
 - **Delete vs. download races are not coordinated.** A download that has already opened the file

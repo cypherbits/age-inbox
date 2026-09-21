@@ -142,6 +142,12 @@ components:
         - path
         - size
   responses:
+    InternalServerError:
+      description: I/O, crypto or serialization failure inside the server. Produced by handlers, so the body uses the standard error shape.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorRes'
     RangeNotSatisfiable:
       description: Range not satisfiable. The body is plain text, not JSON.
       headers:
@@ -212,6 +218,8 @@ paths:
           description: Missing `application/json` content type.
         '422':
           description: Structurally invalid body, for example an unknown field.
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/config:
     get:
       operationId: getVaultConfig
@@ -331,6 +339,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/upload/{path}:
     post:
       operationId: uploadFilePath
@@ -411,6 +421,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/unlock:
     post:
       operationId: unlockVault
@@ -468,6 +480,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/lock:
     post:
       operationId: lockVault
@@ -505,6 +519,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/list:
     get:
       operationId: listFiles
@@ -553,6 +569,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/download/{path}:
     get:
       operationId: downloadFile
@@ -642,6 +660,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
         '416':
           $ref: '#/components/responses/RangeNotSatisfiable'
   /inbox/{name}/metadata/{path}:
@@ -695,6 +715,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/delete/{path}:
     delete:
       operationId: deleteFile
@@ -737,6 +759,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/raw/list:
     get:
       operationId: listFilesRaw
@@ -773,11 +797,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
         '404':
-          description: Vault not found.
+          description: Vault or its config file not found.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/raw/download/{path}:
     get:
       operationId: downloadFileRaw
@@ -865,6 +891,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
         '416':
           $ref: '#/components/responses/RangeNotSatisfiable'
   /inbox/{name}/raw/delete/{path}:
@@ -908,3 +936,5 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'

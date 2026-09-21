@@ -14,8 +14,8 @@ Endpoint-by-endpoint reference for the Age Inbox Service REST API.
 | Control bodies | `application/json` |
 | Uploads | `multipart/form-data` |
 | File responses | `application/octet-stream` |
-| Error bodies | `application/json` with `{ "error": "<message>" }` |
-| Auth | No transport-level auth; read operations require an unlock session |
+| Error bodies | `application/json` with `{ "error": "<message>" }` (handler-generated; extractor rejections and `416` are plain text) |
+| Auth | No transport-level auth; decrypted reads and `delete` require an unlock session |
 
 > The `info.version` field in `openapi.yaml` versions the **REST contract**, not the crate
 > (`age-inbox-server` / `age-inbox-core` carry their own Cargo versions, currently `0.1.0`).
@@ -315,8 +315,8 @@ payload that has no sidecar on disk**.
 [ { "path": "drop-9f2c...f607.age", "size": 35120 } ]
 ```
 
-**Status codes:** `200`, `400` (invalid name), `403` (`allow_list: false`), `404` (vault not
-found), `500`.
+**Status codes:** `200`, `400` (invalid name), `403` (`allow_list: false`), `404` (vault/config
+missing), `500`.
 
 ### `GET /inbox/{name}/raw/download/{path}`
 

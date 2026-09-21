@@ -5,7 +5,7 @@
 A secure, RESTful **drop-off inbox** written in Rust. Create a password-protected vault and let
 clients upload files into it over HTTP: the server encrypts every upload with the vault's public key
 before it reaches disk, and content can be decrypted only after unlocking with the password. Files
-are encrypted at rest and streamed, so keys and large payloads never stay in memory.
+are encrypted at rest and streamed rather than buffered.
 
 ## The mental model
 
@@ -71,9 +71,10 @@ recipients — the `age` Rust crate, no custom format. The vault keypair is deri
 from the password and vault name: a 16-byte salt built from the name is fed to
 `argon2::Argon2::default()` (**Argon2id**, 32-byte output), the bytes are encoded as an
 `AGE-SECRET-KEY-...` Bech32 string and parsed as an `age` X25519 identity. Encryption and decryption
-are fully streamed, so memory stays flat regardless of file size (the core's reader-based encryptor
-uses a 128 KiB buffer). The derived identity is held in memory only while a vault is unlocked
-(1 hour) and is zeroized on drop.
+are streamed, so memory stays flat as files grow (the core's reader-based encryptor uses a 128 KiB
+buffer); the only buffering fallback is a `Range` download of a payload with no recorded size (see
+[PROTOCOL §6.8](docs/PROTOCOL.md#68-download-a-byte-range)). The derived identity is held in memory
+only while a vault is unlocked (1 hour) and is zeroized on drop.
 
 ## Quickstart
 
@@ -114,6 +115,9 @@ docker compose up -d
 ```
 
 ### Prebuilt image (GHCR)
+
+The release workflow publishes the image to GHCR as `ghcr.io/cypherbits/age-inbox`, tagged `latest`
+and with the release tag:
 
 ```yaml
 services:
@@ -252,7 +256,7 @@ permissions: {"allow_subfolders":false,"allow_upload":true,"allow_download":true
 ```
 
 - `inbox-name` is written for humans; the server never reads it.
-- `public-key` is the X25519 recipient. It is the only value required to upload.
+- `public-key` is the X25519 recipient the server uses to encrypt uploads. Clients never send it.
 - A missing `permissions` line falls back to defaults (permissive except `allow_subfolders`).
 
 You can inspect the public policy without authenticating:
@@ -267,16 +271,13 @@ curl http://localhost:3000/inbox/my-vault/config
   moving a vault directory makes existing ciphertext permanently undecryptable.
 - **Only the first 16 bytes of the vault name feed the salt.** Two names that share their first 16
   bytes derive the same keys for a given password.
-- **The public key is not an upload credential.** Uploading requires only network access and
-  `allow_upload`; the server encrypts with the recipient stored in `.inbox-age.config`. With the
-  default policy, any reachable client can therefore write to a vault.
+- **Uploads are server-side and unauthenticated.** No key material is accepted, the public key is
+  not an upload credential, and the server handles plaintext in transit, so TLS matters. With the
+  default policy, any reachable client can write to a vault.
 - **The public key is returned only by `POST /inbox`.** There is no endpoint to fetch it later, so
   capture it at creation time (or read it from `.inbox-age.config`).
-- **Uploads accept plaintext only.** No endpoint accepts a pre-encrypted `age` payload, so
-  "client-side encryption" would mean writing the `.age` file and its `.meta.age` sidecar into the
-  vault directory yourself.
-- **Uploads are not end-to-end encrypted.** The server receives plaintext and encrypts it itself;
-  without TLS, a network observer can read an upload in flight.
+- **No endpoint accepts a pre-encrypted `age` payload**, so "client-side encryption" would mean
+  writing the `.age` file and its `.meta.age` sidecar into the vault directory yourself.
 - **The `raw/*` endpoints are unauthenticated.** Anyone who can reach the server can list, download
   ciphertext and (with `allow_delete`) delete files while a vault is locked. Decryption still
   requires the password. Restrict network access, and set `allow_list`, `allow_download` or
