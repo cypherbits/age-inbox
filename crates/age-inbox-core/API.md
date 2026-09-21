@@ -1,14 +1,19 @@
 # age-inbox-core API Reference
 
-This document describes the public APIs exposed by `age-inbox-core` for integration in other Rust projects.
+This document describes the public APIs exposed by `age-inbox-core` for integration in other Rust
+projects.
 
-## Crate Overview
+The server crate `age-inbox-server` is a thin wrapper around these functions; see
+[`../../docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) for how they fit together and
+[`../../docs/CRYPTO_MODEL.md`](../../docs/CRYPTO_MODEL.md) for the cryptographic model.
+
+## Crate overview
 
 `age-inbox-core` provides:
 
 - Deterministic key derivation from `(password, vault_name)`
 - Vault lifecycle helpers (create, unlock, lock)
-- Streaming AGE encryption/decryption for file content
+- Streaming AGE encryption/decryption for file content, including byte-range decryption
 - Encrypted JSON metadata helpers
 
 `lib.rs` exports:
@@ -16,13 +21,19 @@ This document describes the public APIs exposed by `age-inbox-core` for integrat
 - `pub mod crypto;`
 - `pub mod inbox_core;`
 
-## Runtime and Integration Notes
+## Runtime and integration notes
 
 - Async APIs require a Tokio runtime in the caller (`tokio` is **not** started by this library).
-- `age-inbox-core` only depends on `tokio` for file I/O (`fs`, `io-util` features). It does **not** pull in `tokio::sync` or `tokio::time`.
-- **Unlock state is owned and locked by the caller.** Functions that modify the session map (`unlock_vault`, `lock_vault`, `get_unlocked_identity`) receive a plain `&mut HashMap<String, UnlockedVault>`. The caller is responsible for acquiring the appropriate lock before calling them.
-- All time types use `std::time` (`Instant`, `Duration`), not tokio equivalents.
+- `age-inbox-core` depends on `tokio` only for file I/O (`fs`, `io-util` features). It does **not**
+  pull in `tokio::sync` or `tokio::time`, and it has no HTTP dependency.
+- **Unlock state is owned and locked by the caller.** Functions that modify the session map
+  (`unlock_vault`, `lock_vault`, `get_unlocked_identity`) receive a plain
+  `&mut HashMap<String, UnlockedVault>`. The caller is responsible for acquiring the appropriate lock
+  before calling them.
+- All time types use `std::time` (`Instant`, `Duration`), not Tokio equivalents.
 - Paths and names should be validated before filesystem operations.
+- `crypto::derive_keys` performs CPU-bound work (Argon2). In an async application, run it on a
+  blocking thread (`tokio::task::spawn_blocking`) to avoid stalling the runtime.
 
 ## Module: `crypto`
 
@@ -48,22 +59,25 @@ pub fn derive_keys(password: &str, vault_name: &str) -> anyhow::Result<Keys>
 
 Deterministically derives an AGE x25519 keypair from `password` + `vault_name`.
 
-Behavior:
+Behaviour:
 
-- Uses `vault_name` to build a stable 16-byte salt.
-- Uses Argon2 to derive 32 bytes.
-- Encodes as AGE secret key format and parses into `Identity`.
-- Computes public `Recipient` from identity.
+- Uses `vault_name` to build a stable 16-byte salt (first up-to-16 bytes of the name, remaining bytes
+  filled with `i ^ 0xAA`).
+- Uses `argon2::Argon2::default()` (Argon2id) to derive 32 bytes.
+- Encodes them as an uppercase `AGE-SECRET-KEY-...` Bech32 string and parses an `Identity`.
+- Computes the public `Recipient` from the identity.
 
 Important:
 
 - Same `(password, vault_name)` always yields the same keys.
 - Changing either input changes the keys.
+- Only the first 16 bytes of `vault_name` affect the salt; treat the name as key-derivation context,
+  not as a free-form label.
 - Derived key bytes are zeroized after use.
 
 ## Module: `inbox_core`
 
-### Error Type: `InboxCoreError`
+### Error type: `InboxCoreError`
 
 ```rust
 pub enum InboxCoreError {
@@ -84,7 +98,10 @@ pub enum InboxCoreError {
 
 Used by all high-level APIs in this module. Implements `std::error::Error` and `Display`.
 
-## Data Types
+`InvalidSubpath` is currently defined for symmetry but is not raised by any function here; subpath
+validation lives in the `is_valid_subpath` helper and in the server's request layer.
+
+## Data types
 
 ### Struct: `VaultPermissions`
 
@@ -130,7 +147,7 @@ pub struct UnlockedVault {
 }
 ```
 
-Stored in the caller-owned session map. The expiration is checked by `get_unlocked_identity`.
+Stored in the caller-owned session map. Expiration is checked by `get_unlocked_identity`.
 
 ### Struct: `FileMetadata`
 
@@ -143,9 +160,10 @@ pub struct FileMetadata {
 }
 ```
 
-JSON metadata model for sidecar files. `extended` is flattened in JSON for custom fields.
+JSON metadata model for sidecar files. `extended` is flattened in JSON so custom fields appear at the
+top level.
 
-## Validation and Helpers
+## Validation and helpers
 
 ### `is_valid_name`
 
@@ -153,7 +171,7 @@ JSON metadata model for sidecar files. `extended` is flattened in JSON for custo
 pub fn is_valid_name(name: &str) -> bool
 ```
 
-Validates vault name: must not be empty, must not contain `/`, `\\`, or `..`.
+Validates a vault name: must not be empty, must not contain `/`, `\`, or `..`.
 
 ### `is_valid_subpath`
 
@@ -161,7 +179,10 @@ Validates vault name: must not be empty, must not contain `/`, `\\`, or `..`.
 pub fn is_valid_subpath(path: &str) -> bool
 ```
 
-Validates relative subpath: must not contain `..`, must not start with `/`, must not contain `\\`.
+Validates a relative subpath: must not contain `..`, must not start with `/`, must not contain `\`.
+
+> Empty segments and `.` are not normalised or rejected. Callers that need stricter rules should
+> validate before composing paths.
 
 ### `metadata_sidecar_for`
 
@@ -171,7 +192,8 @@ pub fn metadata_sidecar_for(path: &Path) -> Option<PathBuf>
 
 Converts `something.age` → `something.meta.age`.
 
-Returns `None` if the name is not valid UTF-8, does not end with `.age`, or already ends with `.meta.age`.
+Returns `None` if the name is not valid UTF-8, does not end with `.age`, or already ends with
+`.meta.age`.
 
 ### `generate_drop_filename`
 
@@ -181,7 +203,7 @@ pub fn generate_drop_filename() -> String
 
 Generates a random drop filename: `drop-<32 hex chars>.age`.
 
-## Config File APIs
+## Config file APIs
 
 ### `read_vault_config_file`
 
@@ -194,6 +216,7 @@ Reads `.inbox-age.config` from `vault_dir`.
 - Returns `VaultConfigMissing` if the file cannot be read.
 - Returns `InvalidConfig` if `public-key` is missing.
 - `permissions` is optional; defaults apply if missing or unparseable.
+- `inbox-name` is not read; it exists for humans.
 
 ### `write_vault_config_file`
 
@@ -205,9 +228,10 @@ pub async fn write_vault_config_file(
 ) -> Result<(), InboxCoreError>
 ```
 
-Writes `.inbox-age.config` with `inbox-name`, `config.public_key`, and serialized `config.permissions`.
+Writes `.inbox-age.config` with `inbox-name`, `config.public_key`, and serialized
+`config.permissions`.
 
-## Vault Lifecycle APIs
+## Vault lifecycle APIs
 
 ### `create_vault`
 
@@ -238,11 +262,13 @@ pub async fn unlock_vault(
 ) -> Result<(), InboxCoreError>
 ```
 
-Validates the password against the stored public key, then inserts an `UnlockedVault` entry into the caller-provided map.
+Validates the password against the stored public key, then inserts an `UnlockedVault` entry into the
+caller-provided map.
 
 **The caller must acquire their own lock before passing `&mut map` to this function.**
 
-Common errors: `InvalidName`, `VaultNotFound`, `VaultConfigMissing`, `InvalidConfig`, `InvalidPassword`, `Crypto("lock/unlock disabled in config")`.
+Common errors: `InvalidName`, `VaultNotFound`, `VaultConfigMissing`, `InvalidConfig`,
+`InvalidPassword`, `Crypto("lock/unlock disabled in config")`.
 
 ### `lock_vault`
 
@@ -270,7 +296,7 @@ pub fn get_unlocked_identity(
 ) -> Result<age::x25519::Identity, InboxCoreError>
 ```
 
-> ⚠️ This function is **synchronous** — it performs no I/O.
+> This function is **synchronous** — it performs no I/O.
 
 Looks up a vault's identity in the session map.
 
@@ -280,7 +306,7 @@ Looks up a vault's identity in the session map.
 
 **The caller must acquire their own lock before passing `&mut map`.**
 
-## File Encryption/Decryption APIs
+## File encryption/decryption APIs
 
 ### `encrypt_reader_to_age_file`
 
@@ -292,7 +318,8 @@ pub async fn encrypt_reader_to_age_file<R: AsyncRead + Unpin>(
 ) -> Result<u64, InboxCoreError>
 ```
 
-Encrypts bytes from `reader` into an AGE file at `output_path`. Returns the plaintext byte count. Uses a 16 KiB internal buffer.
+Encrypts bytes from `reader` into an AGE file at `output_path`. Returns the plaintext byte count.
+Uses a **128 KiB** internal buffer and streams with `age::Encryptor`, so memory is constant.
 
 ### `decrypt_age_file_to_writer`
 
@@ -308,7 +335,31 @@ Decrypts an AGE file into `writer`. Returns the plaintext byte count.
 
 - Rejects scrypt/passphrase AGE files with `Crypto("passphrase encryption not supported")`.
 
-## Metadata Encryption APIs
+### `decrypt_age_file_range_to_writer`
+
+```rust
+pub async fn decrypt_age_file_range_to_writer<W: AsyncWrite + Unpin>(
+    identity: &age::x25519::Identity,
+    encrypted_path: &Path,
+    writer: &mut W,
+    start: u64,
+    end: u64,
+) -> Result<u64, InboxCoreError>
+```
+
+Decrypts only the plaintext bytes in `[start, end]` (inclusive) of an AGE file and writes them to
+`writer`. Returns the number of bytes written.
+
+- Skips `start` bytes by draining decrypted output into `io::sink()`, then copies
+  `end - start + 1` bytes.
+- Memory usage is `O(chunk_size)` regardless of the file or range size.
+- AGE is a stream format, so skipping is still work: cost is proportional to `start`, not random
+  access. Prefer it over buffering the whole payload only when `start` is small relative to the file.
+- Rejects scrypt/passphrase files the same way as `decrypt_age_file_to_writer`.
+- Callers should validate `end >= start` and that the range fits the plaintext length; the function
+  does not clamp.
+
+## Metadata encryption APIs
 
 ### `encrypt_metadata_file`
 
@@ -333,28 +384,30 @@ pub async fn decrypt_metadata_file(
 
 Decrypts an AGE metadata sidecar and parses the JSON into `FileMetadata`.
 
-## Recommended Usage Flow
+## Recommended usage flow
 
 1. `create_vault(...)` — provision the vault on disk.
 2. `unlock_vault(&mut map, ...)` — caller acquires write lock, passes `&mut map`, releases lock.
-3. Get recipient from `read_vault_config_file(...)` or from the `CreateVaultResult`.
+3. Get the recipient from `read_vault_config_file(...)` or from the `CreateVaultResult`.
 4. `encrypt_reader_to_age_file(...)` — encrypt file content.
 5. Optional: `metadata_sidecar_for(...)` + `encrypt_metadata_file(...)`.
 6. For reads:
    - Caller acquires write lock, calls `get_unlocked_identity(&mut map, ...)` (sync), releases lock.
-   - `decrypt_age_file_to_writer(...)` with the retrieved identity.
+   - `decrypt_age_file_to_writer(...)` or `decrypt_age_file_range_to_writer(...)` with the identity.
    - Optional: `decrypt_metadata_file(...)`.
 7. `lock_vault(&mut map, ...)` when done — caller acquires write lock first.
 
-## Security and Operational Notes
+## Security and operational notes
 
 - Treat passwords and identities as sensitive material; avoid logging them.
 - Keep `unlock_for` windows short and always call `lock_vault` after critical operations.
 - Validate all user inputs with `is_valid_name` / `is_valid_subpath` before composing paths.
-- Config permission parsing is lenient (invalid JSON falls back to defaults); do not rely on it for security enforcement.
+- Config permission parsing is lenient (invalid JSON falls back to defaults); do not rely on it for
+  security enforcement.
 - Handle all `InboxCoreError` variants explicitly at integration boundaries.
+- Never hard-code the vault name outside `derive_keys`: the name is part of the key.
 
-## Minimal Integration Skeleton
+## Minimal integration skeleton
 
 ```rust
 use age_inbox_core::inbox_core::{
@@ -406,5 +459,5 @@ async fn main() -> anyhow::Result<()> {
 
 ---
 
-If you evolve this crate API, update this file alongside code changes to keep integration contracts explicit.
-
+If you evolve this crate API, update this file alongside code changes to keep integration contracts
+explicit.
