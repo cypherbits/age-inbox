@@ -175,7 +175,7 @@ sequenceDiagram
     participant FS as Vault directory
 
     C->>S: POST /inbox {name, password, permissions?}
-    S->>S: validate name; merge permissions over defaults
+    S->>S: validate name, then merge permissions over defaults
     S->>Core: create_vault(vaults_dir, name, password, permissions)
     Core->>Core: derive_keys(password, name) - Argon2id
     Core->>FS: mkdir <vaults_dir>/<name>
@@ -208,7 +208,7 @@ sequenceDiagram
     participant FS as Vault directory
 
     C->>S: POST /inbox/{name}/upload (multipart: file, filename?, origin?, extended?)
-    S->>S: validate name; read config; check allow_upload (403 if denied)
+    S->>S: validate name, read config, check allow_upload (403 if denied)
     S->>FS: create drop-<hex>.age.tmp and drop-<hex>.meta.age.tmp
     S->>Core: stream multipart file part through age::Encryptor -> .age.tmp
     S->>Core: encrypt FileMetadata JSON -> .meta.age.tmp
@@ -270,7 +270,7 @@ sequenceDiagram
     participant M as unlocked_vaults
 
     C->>S: POST /inbox/{name}/unlock {password}
-    S->>S: read config; check allow_lock_unlock (403 if denied)
+    S->>S: read config, check allow_lock_unlock (403 if denied)
     S->>Core: unlock_vault(...) on a blocking thread
     Core->>Core: derive_keys(password, name)
     alt derived recipient == stored public key
@@ -300,7 +300,7 @@ sequenceDiagram
     participant S as Server
 
     rect rgb(240,240,240)
-    note over C,S: Unlocked listing (needs password + allow_list)
+    Note over C,S: Unlocked listing (needs password + allow_list)
     C->>S: GET /inbox/{name}/list
     S->>S: load identity or 401
     S->>S: walk_dir, decrypt each .meta.age sidecar
@@ -308,7 +308,7 @@ sequenceDiagram
     end
 
     rect rgb(240,240,240)
-    note over C,S: Raw listing (no unlock)
+    Note over C,S: Raw listing (no unlock)
     C->>S: GET /inbox/{name}/raw/list
     S->>S: walk_dir, require a sidecar to exist, stat size
     S-->>C: 200 [{path, size}]
@@ -352,7 +352,7 @@ sequenceDiagram
 
     C->>S: GET /inbox/{name}/metadata/{path.age}
     S->>S: path must end in .age and not .meta.age -> 400 otherwise
-    S->>S: check allow_metadata; load identity or 401
+    S->>S: check allow_metadata, then load identity or 401
     S->>S: decrypt sidecar, then overwrite filesize with ciphertext size
     S-->>C: 200 {filename, origin, filesize, ...extended}
 ```
@@ -377,7 +377,7 @@ sequenceDiagram
     participant Core as age-inbox-core
 
     C->>S: GET /inbox/{name}/download/{path.age}
-    S->>S: check allow_download; load identity or 401
+    S->>S: check allow_download, then load identity or 401
     S->>S: resolve Content-Disposition filename from sidecar
     S->>Core: stream-decrypt ciphertext -> plaintext
     S-->>C: 200 application/octet-stream (chunked, Accept-Ranges: bytes)
@@ -443,15 +443,15 @@ sequenceDiagram
     participant S as Server
 
     rect rgb(240,240,240)
-    note over C,S: Decrypted path (requires unlock)
+    Note over C,S: Decrypted path (requires unlock)
     C->>S: DELETE /inbox/{name}/delete/{path}
-    S->>S: check allow_delete; require an entry in unlocked_vaults -> 403 otherwise
+    S->>S: check allow_delete, require an entry in unlocked_vaults -> 403 otherwise
     S->>S: remove payload, then remove sidecar if present
     S-->>C: 200 (empty body)
     end
 
     rect rgb(240,240,240)
-    note over C,S: Raw path (works locked)
+    Note over C,S: Raw path (works locked)
     C->>S: DELETE /inbox/{name}/raw/delete/{path}
     S->>S: check allow_delete
     S->>S: remove payload, then remove sidecar if present
