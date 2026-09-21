@@ -1,59 +1,107 @@
 # Age Inbox Service
 
-*Vibe coded (yes, it is vibe coded, but it should be ok)*
+> Vibe coded — yes, it is vibe coded, but it should be OK.
 
-A secure, RESTful inbox service written in Rust that allows users to create password-protected encrypted vaults and stream file uploads securely directly to disk.
+A secure, RESTful **drop-off inbox** written in Rust. Create a password-protected vault and let
+clients upload files into it over HTTP: the server encrypts every upload with the vault's public key
+before it reaches disk, and content can be decrypted only after unlocking with the password. Files
+are encrypted at rest and streamed rather than buffered.
 
-## Overview
+## The mental model
 
-The **Age Inbox Service** is designed as a drop-off encrypted inbox. It utilizes modern cryptography to ensure that uploaded files are securely encrypted at rest without keeping sensitive keys or large files in memory. 
+An inbox is asymmetric by design:
 
-- **Age Encryption:** Uses the [age specification](https://github.com/C2SP/C2SP/blob/main/age.md) powered by the `age` rust crate (specifically `X25519` recipients) for encrypting streams directly.
-- **Argon2id Key Derivation:** Cryptographic keys are derived securely from user-provided passwords using Argon2id. Private keys are never persisted to disk.
-- **Streaming I/O:** Both encryption and decryption operations are fully streamed. HTTP request bodies are piped directly through the `Encryptor` to disk block-by-block, ensuring O(1) RAM usage regardless of file size.
-- **In-Memory Volatility:** When a vault is temporarily unlocked for downloading or listing files, the private key is held in memory for a maximum of 1 hour, and securely zeroed out (`zeroize`) upon expiration or immediate lock.
+- **Write side (broad):** nothing has to be shared with uploaders beyond reachability and the vault's
+  `allow_upload` flag. The client sends the file to `POST /inbox/{name}/upload` and the **server**
+  encrypts it with the recipient stored in `.inbox-age.config`. The uploader supplies no key
+  material, cannot read what it wrote, and cannot decrypt anything.
+- **Read side (narrow):** the vault owner reconstructs the private key from the password and only
+  then can list, download, or read metadata.
 
-## Technology Stack
+Because the private key is *derived* from `(password, vault name)` instead of being stored, the
+server never persists a decryption key.
 
-- **[Rust](https://www.rust-lang.org/)** (Edition 2021)
-- **[Axum](https://github.com/tokio-rs/axum):** High-performance asynchronous web framework.
-- **[Tokio](https://tokio.rs/):** Asynchronous runtime for I/O and streaming operations.
-- **[Age](https://crates.io/crates/age):** Streamable, modern encryption.
-- **[Argon2](https://crates.io/crates/argon2):** Password hashing and KDF algorithms.
+> **The public key is not an upload credential.** Encryption happens server-side, so the recipient
+> key is never sent by a client and possessing it grants no access. `POST /inbox` returns it for
+> identification and for tooling that writes `age` ciphertext straight into the vault directory —
+> note that **no HTTP endpoint accepts pre-encrypted payloads**, and a `.age` file placed by hand is
+> only usable if you also produce a matching `.meta.age` sidecar; otherwise the listing endpoints
+> skip it and downloads fail. And since the server handles the plaintext in transit, this is **not**
+> end-to-end encryption — transport security (TLS) matters.
 
-## Endpoints
+## Architecture at a glance
 
-Detailed endpoint definitions are available in `docs/API.md`.
+This repository is a Cargo workspace with **two crates**. Everything the server does is delegated to
+the core; the server adds HTTP, permissions, streaming and concurrency.
 
-For a fully interactive schema, explore the OpenAPI 3 specification in `docs/openapi.yaml`.
+| Crate | Package | Artifact | Responsibility |
+|-------|---------|----------|----------------|
+| Root | `age-inbox-server` | lib `age_inbox` + bin `age-inbox-server` | Axum REST API, routing, CORS, body limits, TLS, permission enforcement |
+| `crates/age-inbox-core` | `age-inbox-core` | library only | Deterministic key derivation, vault lifecycle, streaming AGE encrypt/decrypt, metadata sidecars |
 
-## Deployment
+Dependency direction is one-way:
 
-The repository includes a complete `Dockerfile` and `docker-compose.yml` to set up the inbox service with an externally mounted volume for the vaults.
+```mermaid
+graph LR
+    Client -->|HTTP| Server["age-inbox-server<br/>(Axum REST)"]
+    Server -->|calls| Core["age-inbox-core<br/>(crypto + vault logic)"]
+    Core -->|"age, argon2, zeroize"| Disk[("vaults/ on disk")]
+```
+
+- `src/lib.rs` re-exports the core modules, so handlers use `crate::inbox_core::...` and
+  `crate::crypto::...` directly.
+- The core has **no HTTP dependency** and can be embedded in other Rust projects. See
+  [`crates/age-inbox-core/API.md`](crates/age-inbox-core/API.md).
+
+Read next:
+
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — crate layout, module map, state ownership,
+  request lifecycle, on-disk layout.
+- **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — the end-to-end protocol and step-by-step use-case flows
+  (create, upload, list, download + range, metadata, delete, lock/unlock, raw access).
+- **[docs/API.md](docs/API.md)** — endpoint reference with status codes and semantics.
+- **[docs/openapi.yaml](docs/openapi.yaml)** — machine-readable OpenAPI 3 contract.
+- **[docs/CRYPTO_MODEL.md](docs/CRYPTO_MODEL.md)** — key derivation and threat model.
+- **[docs/SPECIFICATION.md](docs/SPECIFICATION.md)** — design specification and non-goals.
+
+## Cryptography in one paragraph
+
+Vault content is encrypted with [age](https://github.com/C2SP/C2SP/blob/main/age.md) using X25519
+recipients — the `age` Rust crate, no custom format. The vault keypair is derived deterministically
+from the password and vault name: a 16-byte salt built from the name is fed to
+`argon2::Argon2::default()` (**Argon2id**, 32-byte output), the bytes are encoded as an
+`AGE-SECRET-KEY-...` Bech32 string and parsed as an `age` X25519 identity. Encryption and decryption
+are streamed, so memory stays flat as files grow (the core's reader-based encryptor uses a 128 KiB
+buffer); the only buffering fallback is a `Range` download of a payload with no recorded size (see
+[PROTOCOL §6.8](docs/PROTOCOL.md#68-download-a-byte-range)). The derived identity is held in memory
+only while a vault is unlocked (1 hour) and is zeroized on drop.
+
+## Quickstart
 
 ### Docker Compose
-
-The simplest way to start the service from this repository is via Docker Compose:
 
 ```bash
 docker compose up --build -d
 ```
 
-This will run the Axum API on port `3000` and permanently mount the host's local `./vaults` directory into the container to ensure encrypted files survive restarts.
+The bundled [`docker-compose.yml`](docker-compose.yml) builds the image, publishes the API on port
+`3000`, and persists vaults in a **named volume** (`age-inbox-data`) mounted at `/app/vaults`.
 
-If you want to run directly from the published image in GHCR, create a `docker-compose.yml` like this:
+If you prefer the host directory to be visible (for backups, inspection, etc.), bind-mount it
+instead of using a named volume:
 
 ```yaml
 services:
   age-inbox:
-    image: ghcr.io/cypherbits/age-inbox:latest
+    build: .
     container_name: age-inbox
     environment:
-      - CORS_ALLOWED_ORIGINS=http://localhost:4200,https://app.example.com
-      - CORS_ALLOWED_METHODS=GET,POST,OPTIONS
-      - CORS_ALLOWED_HEADERS=content-type,x-file-origin,x-filename,x-extended-metadata
+      - CORS_ALLOWED_ORIGINS=http://localhost:4200
+      - CORS_ALLOWED_METHODS=GET,POST,DELETE,OPTIONS
+      - CORS_ALLOWED_HEADERS=content-type,range
       - CORS_ALLOW_CREDENTIALS=false
       - CORS_MAX_AGE_SECS=600
+      - MAX_UPLOAD_SIZE_BYTES=1073741824
       - RUST_LOG=info
     ports:
       - "3000:3000"
@@ -62,48 +110,84 @@ services:
     restart: unless-stopped
 ```
 
-Then start it with:
-
 ```bash
 docker compose up -d
 ```
 
-### Native Execution
+### Prebuilt image (GHCR)
 
-If you prefer running via Cargo directly, it runs on HTTP by default:
+The release workflow publishes the image to GHCR as `ghcr.io/cypherbits/age-inbox`, tagged `latest`
+and with the release tag:
+
+```yaml
+services:
+  age-inbox:
+    image: ghcr.io/cypherbits/age-inbox:latest
+    container_name: age-inbox
+    environment:
+      - CORS_ALLOWED_ORIGINS=http://localhost:4200
+      - RUST_LOG=info
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./vaults:/app/vaults
+    restart: unless-stopped
+```
+
+### Native execution
 
 ```bash
 cargo run --release
 ```
 
-The application will listen on HTTP `0.0.0.0:3000` and create a local `vaults` folder. 
+Listens on HTTP `0.0.0.0:3000` and creates/uses a local `./vaults` directory.
 
-You can override bind address and storage path:
+Override bind address and storage path:
 
 ```bash
 cargo run --release -- --host 127.0.0.1 --port 3001 --vaults-dir ./my-vaults
 ```
 
-## Environment Variables
+## Configuration
 
-The server supports CORS and logging configuration via environment variables.
+### Command-line flags
 
-- `CORS_ALLOWED_ORIGINS` (optional): Comma-separated list of allowed origins (`https://app.example.com,http://localhost:5173`) or `*`.
-  - If this variable is not set, CORS headers are not added.
-- `CORS_ALLOWED_METHODS` (optional): Comma-separated methods (e.g. `GET,POST,OPTIONS`) or `*`.
-- `CORS_ALLOWED_HEADERS` (optional): Comma-separated request headers allowed in preflight (e.g. `content-type,x-file-origin,x-filename,x-extended-metadata`) or `*`.
-- `CORS_EXPOSE_HEADERS` (optional): Comma-separated response headers exposed to browsers.
-- `CORS_ALLOW_CREDENTIALS` (optional): `true/false` (also accepts `1/0`, `yes/no`, `on/off`).
-- `CORS_MAX_AGE_SECS` (optional): Preflight cache max age in seconds.
-- `MAX_UPLOAD_SIZE_BYTES` (optional): Maximum file upload size in bytes. Defaults to `1073741824` (1 GB) if not provided.
-- `RUST_LOG` (optional): Log filter for `tracing` output. Common values: `error`, `warn`, `info`, `debug`, `trace`. You can also use per-module filters, e.g. `age_inbox=debug,tower_http=info`.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host <IP>` | `0.0.0.0` | Interface to bind. |
+| `--port <PORT>` | `3000` | TCP port. |
+| `--vaults-dir <PATH>` | `./vaults` | Root directory for all vaults (created if missing). |
+| `--https` | off | Serve TLS with `cert.pem`/`key.pem` (self-signed and generated on first run if absent). |
+
+> **Note:** the vault directory is configured **only** through `--vaults-dir`. The `VAULTS_DIR`
+> environment variable set in the `Dockerfile` is **not read by the server**; it works there merely
+> because the container's working directory is `/app`, so the default `./vaults` resolves to
+> `/app/vaults`.
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORS_ALLOWED_ORIGINS` | unset | Comma-separated origins, or `*`. If unset, **no CORS headers are added**. |
+| `CORS_ALLOWED_METHODS` | unset | Comma-separated methods, or `*`. |
+| `CORS_ALLOWED_HEADERS` | unset | Comma-separated request headers, or `*`. `content-type` and `range` are always added when a list is given. |
+| `CORS_EXPOSE_HEADERS` | unset | Comma-separated response headers. `content-disposition`, `content-range` and `accept-ranges` are always added when a list is given. |
+| `CORS_ALLOW_CREDENTIALS` | `false` | Accepts `true/false`, `1/0`, `yes/no`, `on/off`. |
+| `CORS_MAX_AGE_SECS` | unset | Preflight cache duration in seconds. |
+| `MAX_UPLOAD_SIZE_BYTES` | `1073741824` (1 GiB) | Maximum request body size (applied to the whole router; uploads are the payloads that matter). |
+| `RUST_LOG` | `info` | `tracing` filter, e.g. `age_inbox=debug,tower_http=info`. |
+
+CORS is only activated when `CORS_ALLOWED_ORIGINS` is set. All other `CORS_*` variables refine that
+layer. No methods or headers are allowed by default, so browser clients need at least
+`CORS_ALLOWED_METHODS=GET,POST,DELETE,OPTIONS` and `CORS_ALLOWED_HEADERS=content-type,range`.
 
 Example:
 
 ```bash
 CORS_ALLOWED_ORIGINS=http://localhost:4200,https://app.example.com \
-CORS_ALLOWED_METHODS=GET,POST,OPTIONS \
-CORS_ALLOWED_HEADERS=content-type,x-file-origin,x-filename,x-extended-metadata \
+CORS_ALLOWED_METHODS=GET,POST,DELETE,OPTIONS \
+CORS_ALLOWED_HEADERS=content-type,range \
+CORS_EXPOSE_HEADERS=content-disposition,content-range,accept-ranges \
 CORS_ALLOW_CREDENTIALS=false \
 CORS_MAX_AGE_SECS=600 \
 MAX_UPLOAD_SIZE_BYTES=2147483648 \
@@ -111,102 +195,135 @@ RUST_LOG=info \
 cargo run --release
 ```
 
-#### Enabling HTTPS
-You can launch the server in HTTPS mode by passing the `--https` flag:
+### Enabling HTTPS
 
 ```bash
 cargo run --release -- --https
 ```
 
-Upon the first startup with `--https`, it will automatically generate a self-signed `cert.pem` and `key.pem` in the current directory.
+On the first run with `--https`, a self-signed `cert.pem` and `key.pem` are generated in the current
+directory and reused afterwards. Because the certificate is stable across restarts, clients can pin
+its public key or certificate hash to defend against MITM attacks.
 
-## E2E Tests
+## Vault permission model
 
-The repository includes a dedicated E2E suite under `tests/e2e/` that boots the real server binary and validates the endpoint flow over HTTP.
+Each vault stores its policy in `.inbox-age.config` and the server re-reads it **on every request**,
+so edits take effect immediately. Permissions gate the following endpoints:
 
-Run it with:
+| Permission | Default | Endpoints gated |
+|------------|---------|-----------------|
+| `allow_subfolders` | `false` | `POST /inbox/{name}/upload/{*path}` |
+| `allow_upload` | `true` | `POST /inbox/{name}/upload`, `POST /inbox/{name}/upload/{*path}` |
+| `allow_download` | `true` | `GET /inbox/{name}/download/{*path}`, `GET /inbox/{name}/raw/download/{*path}` |
+| `allow_list` | `true` | `GET /inbox/{name}/list`, `GET /inbox/{name}/raw/list` |
+| `allow_delete` | `true` | `DELETE /inbox/{name}/delete/{*path}`, `DELETE /inbox/{name}/raw/delete/{*path}` |
+| `allow_metadata` | `true` | `GET /inbox/{name}/metadata/{*path}` |
+| `allow_lock_unlock` | `true` | `POST /inbox/{name}/unlock`, `POST /inbox/{name}/lock` |
 
-```bash
-cargo test --test e2e_tests -- --test-threads=1
+`POST /inbox` and `GET /inbox/{name}/config` are not gated by permissions.
+
+Granular overrides are supplied at creation time and merged over the defaults:
+
+```json
+{
+  "name": "my-vault",
+  "password": "super-secret",
+  "permissions": { "allow_subfolders": true, "allow_download": false }
+}
 ```
 
-## Benchmarks
+Afterwards, edit `.inbox-age.config` directly to change the policy.
 
-The core library (`age-inbox-core`) uses `criterion` for statistical performance tracking of the low-level encrypt/decrypt and vault operation logic. This ensures that any refactoring on the stream I/O doesn't cause regressions. 
+## On-disk layout
 
-To run the full suite locally and generate HTML performance reports, execute:
-
-```bash
-cargo bench -p age-inbox-core
 ```
-Detailed metrics and plots (e.g., changes compared to the previous run) will be available in `target/criterion/report/index.html`. For deep CPU or memory profiling, consider running `samply record cargo bench -p age-inbox-core`.
+vaults/
+└── <vault-name>/
+    ├── .inbox-age.config        # public recipient + permissions (no secrets)
+    ├── drop-3f9c....age         # encrypted payload (AGE, X25519 recipient)
+    ├── drop-3f9c....meta.age    # encrypted JSON metadata sidecar
+    └── <subfolder>/             # only when allow_subfolders is enabled
+        ├── drop-....age
+        └── drop-....meta.age
+```
 
-### Certificate Pinning
-
-Since the API generates a steady `cert.pem` on its first run (and uses it for all subsequent runs), you can implement **Certificate Pinning** on your clients. Pinning the exact public key or certificate hash of this `cert.pem` protects against Man-in-the-Middle (MITM) attacks.
-
-## Vault Configuration
-
-Each vault is stored as a directory with a `.inbox-age.config` file that defines its settings. This file is created automatically when a new vault is created via the API.
-
-### Configuration File Format
-
-The `.inbox-age.config` file is a simple text-based format:
+`.inbox-age.config` is a line-oriented text file:
 
 ```
 inbox-name: my-vault
-public-key: <x25519-public-key>
+public-key: age1...
 permissions: {"allow_subfolders":false,"allow_upload":true,"allow_download":true,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
 ```
 
-### Configuration Options
+- `inbox-name` is written for humans; the server never reads it.
+- `public-key` is the X25519 recipient the server uses to encrypt uploads. Clients never send it.
+- A missing `permissions` line falls back to defaults (permissive except `allow_subfolders`).
 
-#### Permissions Object
-Granular control over vault settings and API operations. All permissions are `boolean` (default values shown below).
-
-| Permission | Default | Endpoint(s) | Description |
-|-----------|---------|----------|-------------|
-| `allow_subfolders` | `false` | `POST /inbox/{name}/upload/{*path}` | Controls whether files can be uploaded to subdirectories. Set to `true` to allow subfolder uploads. |
-| `allow_upload` | `true` | `POST /inbox/{name}/upload/*` | Controls file uploads to the vault. |
-| `allow_download` | `true` | `GET /inbox/{name}/download/*` | Controls downloading and decrypting files (requires vault unlock). |
-| `allow_list` | `true` | `GET /inbox/{name}/list` & `GET /inbox/{name}/raw/list` | Controls listing files in the vault. |
-| `allow_delete` | `true` | `DELETE /inbox/{name}/delete/*` & `DELETE /inbox/{name}/raw/delete/*` | Controls file deletion. |
-| `allow_metadata` | `true` | `GET /inbox/{name}/metadata/*` | Controls access to decrypted file metadata. |
-| `allow_lock_unlock` | `true` | `POST /inbox/{name}/unlock` & `POST /inbox/{name}/lock` | Controls vault unlock/lock operations. |
-
-### Viewing Vault Configuration
-
-You can query the current configuration of a vault (without authentication) using:
+You can inspect the public policy without authenticating:
 
 ```bash
 curl http://localhost:3000/inbox/my-vault/config
 ```
 
-**Response:**
-```json
-{
-  "permissions": {
-    "allow_subfolders": false,
-    "allow_upload": true,
-    "allow_download": true,
-    "allow_list": true,
-    "allow_delete": true,
-    "allow_metadata": true,
-    "allow_lock_unlock": true
-  }
-}
+## Security notes
+
+- **The vault name is part of the key.** The salt is derived from the vault name, so renaming or
+  moving a vault directory makes existing ciphertext permanently undecryptable.
+- **Only the first 16 bytes of the vault name feed the salt.** Two names that share their first 16
+  bytes derive the same keys for a given password.
+- **Uploads are server-side and unauthenticated.** No key material is accepted, the public key is
+  not an upload credential, and the server handles plaintext in transit, so TLS matters. With the
+  default policy, any reachable client can write to a vault.
+- **The public key is returned only by `POST /inbox`.** There is no endpoint to fetch it later, so
+  capture it at creation time (or read it from `.inbox-age.config`).
+- **No endpoint accepts a pre-encrypted `age` payload**, so "client-side encryption" would mean
+  writing the `.age` file and its `.meta.age` sidecar into the vault directory yourself.
+- **The `raw/*` endpoints are unauthenticated.** Anyone who can reach the server can list, download
+  ciphertext and (with `allow_delete`) delete files while a vault is locked. Decryption still
+  requires the password. Restrict network access, and set `allow_list`, `allow_download` or
+  `allow_delete` to `false` for a locked-down deployment.
+- **Unlock state is volatile.** The derived identity lives in memory for at most one hour and is
+  discarded on expiry or `POST /inbox/{name}/lock`; it is never written to disk.
+
+See [docs/CRYPTO_MODEL.md](docs/CRYPTO_MODEL.md) and [docs/PROTOCOL.md](docs/PROTOCOL.md) for the
+full model.
+
+## Tests and benchmarks
+
+End-to-end tests boot the real server binary and exercise the endpoint flow over HTTP:
+
+```bash
+cargo test --test e2e_tests -- --test-threads=1
 ```
 
-### Default Behavior
+Run the whole workspace suite with:
 
-When a vault is created, all permissions are enabled by default (`true` for operations, `false` for `allow_subfolders`). This provides full access to all API operations while restricting uploads to the vault root.
-
-To customize permissions, the `.inbox-age.config` file would need to be manually edited on the filesystem. For example, to disable downloads while allowing subfolders:
-
-```
-inbox-name: my-vault
-public-key: <x25519-public-key>
-permissions: {"allow_subfolders":true,"allow_upload":true,"allow_download":false,"allow_list":true,"allow_delete":true,"allow_metadata":true,"allow_lock_unlock":true}
+```bash
+cargo test --workspace
 ```
 
-After modifying the file, the changes take effect immediately on the next API request to that vault.
+The core crate ships `criterion` benchmarks for the low-level encrypt/decrypt, range-decrypt,
+metadata and vault-lifecycle paths:
+
+```bash
+cargo bench -p age-inbox-core
+```
+
+HTML reports land in `target/criterion/report/index.html`. For CPU/memory profiling, try
+`samply record cargo bench -p age-inbox-core`.
+
+## Documentation map
+
+| Document | What it covers |
+|----------|----------------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Workspace layout, crate boundaries, module map, state and concurrency, at-rest layout |
+| [docs/PROTOCOL.md](docs/PROTOCOL.md) | Wire protocol, naming/addressing, session model, use-case flows, error matrix |
+| [docs/API.md](docs/API.md) | Endpoint-by-endpoint reference (requests, responses, status codes) |
+| [docs/openapi.yaml](docs/openapi.yaml) | OpenAPI 3 contract |
+| [docs/CRYPTO_MODEL.md](docs/CRYPTO_MODEL.md) | Key derivation, secret handling, threat model |
+| [docs/SPECIFICATION.md](docs/SPECIFICATION.md) | Design goals, layering and non-goals |
+| [crates/age-inbox-core/API.md](crates/age-inbox-core/API.md) | Public Rust API of the core library |
+
+## License
+
+MIT (see the core crate's `Cargo.toml`).

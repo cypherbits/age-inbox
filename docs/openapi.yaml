@@ -1,7 +1,20 @@
 openapi: 3.0.3
 info:
   title: Age Inbox API
-  description: A REST API for creating Age-encrypted password-protected file inboxes. Supports encrypted metadata, subfolders on-the-fly, raw (locked) file access, and HTTP Range requests.
+  description: >
+    A REST API for creating Age-encrypted, password-protected file inboxes. Supports encrypted
+    metadata, subfolders created on demand, raw (locked) ciphertext access and HTTP Range requests.
+
+
+    Authentication model: there is no transport-level auth. Every request re-reads the vault's
+    `.inbox-age.config`, so the per-vault permission flags apply immediately to the next request.
+    Read operations on decrypted content additionally require an unlock session created by
+    `POST /inbox/{name}/unlock`, which lives in server memory for one hour.
+
+
+    Size semantics: `size` in the listing endpoints and `filesize` in `GET /metadata` are the
+    **ciphertext** sizes on disk. The metadata sidecar itself records the **plaintext** byte count,
+    which is what the Range total in `GET /download` is computed from.
   version: 1.5.0
   license:
     name: MIT
@@ -22,7 +35,7 @@ components:
           type: string
     VaultPermissions:
       type: object
-      description: Granular permission flags controlling which operations are allowed on a vault.
+      description: Granular permission flags controlling which operations are allowed on a vault. All flags default to true except `allow_subfolders` (false).
       required:
         - allow_subfolders
         - allow_upload
@@ -40,13 +53,13 @@ components:
           description: Whether file uploads to the vault are allowed.
         allow_download:
           type: boolean
-          description: Whether downloading and decrypting files is allowed (requires vault unlock).
+          description: Whether downloading is allowed. Applies to both decrypted downloads and `raw/download`.
         allow_list:
           type: boolean
-          description: Whether listing vault files is allowed.
+          description: Whether listing vault files is allowed. Applies to both `list` and `raw/list`.
         allow_delete:
           type: boolean
-          description: Whether file deletion is allowed.
+          description: Whether file deletion is allowed. Applies to both `delete` and `raw/delete`.
         allow_metadata:
           type: boolean
           description: Whether accessing decrypted file metadata is allowed.
@@ -55,7 +68,7 @@ components:
           description: Whether lock and unlock operations are allowed.
     CreateInboxPermissions:
       type: object
-      description: Optional permission overrides for vault creation. Any omitted field falls back to the server default.
+      description: Optional permission overrides for vault creation. Any omitted field falls back to the server default. Unknown fields are rejected with 422.
       properties:
         allow_subfolders:
           type: boolean
@@ -65,7 +78,7 @@ components:
           description: Whether file uploads to the vault are allowed. Default is true.
         allow_download:
           type: boolean
-          description: Whether downloading and decrypting files is allowed (requires vault unlock). Default is true.
+          description: Whether downloading is allowed. Default is true.
         allow_list:
           type: boolean
           description: Whether listing vault files is allowed. Default is true.
@@ -80,6 +93,7 @@ components:
           description: Whether lock and unlock operations are allowed. Default is true.
     FileMetadata:
       type: object
+      description: Decrypted metadata stored in the `.meta.age` sidecar. `filename`, `origin` and `filesize` are first-class; every other multipart field is flattened in as a string.
       properties:
         filename:
           type: string
@@ -90,23 +104,27 @@ components:
         filesize:
           type: integer
           format: uint64
-          description: Size of the encrypted .age file on disk (in bytes).
+          description: >
+            Size in bytes. In `GET /metadata` responses this is the encrypted `.age` file size on
+            disk (the handler overwrites the value stored in the sidecar).
       additionalProperties: true
     ListedFile:
       type: object
       properties:
         path:
           type: string
+          description: Storage path of the encrypted payload, relative to the vault root (for example `drop-9f2c....age`).
         filename:
           type: string
           nullable: true
+          description: Original filename recorded in metadata (basename only).
         origin:
           type: string
           nullable: true
         size:
           type: integer
           format: uint64
-          description: Size of the encrypted .age file on disk (in bytes).
+          description: Size of the encrypted `.age` file on disk, in bytes.
       required:
         - path
         - size
@@ -115,19 +133,43 @@ components:
       properties:
         path:
           type: string
+          description: Storage path of the encrypted payload, relative to the vault root.
         size:
           type: integer
           format: uint64
-          description: Size of the encrypted .age file on disk (in bytes).
+          description: Size of the encrypted `.age` file on disk, in bytes.
       required:
         - path
         - size
+  responses:
+    InternalServerError:
+      description: I/O, crypto or serialization failure inside the server. Produced by handlers, so the body uses the standard error shape.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorRes'
+    RangeNotSatisfiable:
+      description: Range not satisfiable. The body is plain text, not JSON.
+      headers:
+        Content-Range:
+          schema:
+            type: string
+          description: 'Unsatisfied range, for example `bytes */4096`.'
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: Range not satisfiable
 paths:
   /inbox:
     post:
       operationId: createInbox
       summary: Create a new vault/inbox
-      description: Derives an Age identity from the provided password and creates a new vault on disk.
+      description: >
+        Derives an Age identity from the provided password and vault name and creates a new vault on
+        disk. Returns the vault's public key, which is the only way to obtain it. The public key is
+        not an upload credential: the upload endpoints encrypt server-side with this recipient, and
+        no endpoint accepts pre-encrypted ciphertext.
       security: []
       requestBody:
         required: true
@@ -141,10 +183,10 @@ paths:
               properties:
                 name:
                   type: string
-                  description: Unique name for the vault.
+                  description: Unique name for the vault. Must not be empty or contain `/`, `\` or `..`.
                 password:
                   type: string
-                  description: Password to derive the key using Argon2id.
+                  description: Password used to derive the key with Argon2id. Never stored.
                 permissions:
                   $ref: '#/components/schemas/CreateInboxPermissions'
       responses:
@@ -159,8 +201,9 @@ paths:
                     type: boolean
                   public_key:
                     type: string
+                    description: X25519 recipient key. Returned only here; not required by the upload endpoints, which encrypt server-side.
         '400':
-          description: Invalid vault name.
+          description: Invalid vault name, or malformed JSON.
           content:
             application/json:
               schema:
@@ -171,11 +214,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '415':
+          description: Missing `application/json` content type.
+        '422':
+          description: Structurally invalid body, for example an unknown field.
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/config:
     get:
       operationId: getVaultConfig
       summary: Get vault configuration
-      description: Returns the public configuration of a vault, including all permission settings. Does not require authentication.
+      description: Returns the public permission policy of a vault. Does not require authentication and never returns the public key.
       security: []
       parameters:
         - in: path
@@ -201,7 +250,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
         '404':
-          description: Vault not found.
+          description: Vault or its config file not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
+        '500':
+          description: Config exists but has no `public-key`.
           content:
             application/json:
               schema:
@@ -210,7 +265,12 @@ paths:
     post:
       operationId: uploadFileRoot
       summary: Upload a file to a vault root
-      description: Encrypts the multipart `file` stream and saves it to the vault root. Metadata must be sent in `multipart/form-data` fields to avoid HTTP header size limits. Generates a separate `.meta.age` encrypted file.
+      description: >
+        Encrypts the multipart `file` stream and stores it in the vault root. The server generates the
+        storage name (`drop-<32 hex>.age`); the original filename travels inside the encrypted
+        `.meta.age` sidecar. Uploads are streamed and committed by renaming `.tmp` files into place.
+        No key material is accepted or required: the server encrypts with the recipient from vault
+        configuration, so `allow_upload` is the only access gate.
       security: []
       parameters:
         - in: path
@@ -237,7 +297,7 @@ paths:
                   description: The source origin string.
                 extended:
                   type: string
-                  description: A JSON encoded object of additional external properties.
+                  description: A JSON-encoded object of additional metadata fields, merged into the sidecar.
                 file:
                   type: string
                   format: binary
@@ -250,13 +310,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GenericRes'
         '400':
-          description: Invalid vault name, malformed multipart payload, or missing filename in both field and file part.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
-        '415':
-          description: Unsupported media type. Content-Type must be multipart/form-data.
+          description: Invalid vault name, malformed multipart payload, or missing filename in both the `filename` field and the file part.
           content:
             application/json:
               schema:
@@ -273,11 +327,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '413':
+          description: A non-file multipart field exceeded the 64 KiB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
+        '415':
+          description: Unsupported media type. Content-Type must be multipart/form-data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/upload/{path}:
     post:
       operationId: uploadFilePath
       summary: Upload a file to a subfolder within a vault
-      description: Encrypts multipart `file` stream directly to a nested folder inside the vault. Metadata must be sent in `multipart/form-data` fields to avoid HTTP header size limits. Fails if vault configuration disabled nested folders.
+      description: >
+        Encrypts the multipart `file` stream directly into a nested folder inside the vault, creating
+        the subfolder on demand. Fails if the vault configuration disabled nested folders. No key
+        material is required; encryption uses the recipient stored in vault configuration.
       security: []
       parameters:
         - in: path
@@ -291,7 +362,7 @@ paths:
           required: true
           schema:
             type: string
-          description: The relative subfolder path.
+          description: The relative subfolder path. Must not contain `..`, a leading `/`, or `\`.
       requestBody:
         required: true
         description: Multipart form with `file` plus optional metadata fields.
@@ -315,19 +386,13 @@ paths:
                   description: The binary file to encrypt and save. Its multipart filename is used as fallback when `filename` is missing/empty.
       responses:
         '200':
-          description: File stored within the specified bounded nested folder.
+          description: File stored within the specified nested folder.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericRes'
         '400':
-          description: Invalid vault name, subfolder path, malformed multipart payload, or missing filename in both field and file part.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
-        '415':
-          description: Unsupported media type. Content-Type must be multipart/form-data.
+          description: Invalid vault name, invalid subfolder path, malformed multipart payload, or missing filename in both the `filename` field and the file part.
           content:
             application/json:
               schema:
@@ -344,11 +409,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '413':
+          description: A non-file multipart field exceeded the 64 KiB limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
+        '415':
+          description: Unsupported media type. Content-Type must be multipart/form-data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/unlock:
     post:
       operationId: unlockVault
       summary: Temporarily unlock a vault
-      description: Validates the password and temporarily caches the derived Age private key in-memory for 1 hour.
+      description: >
+        Validates the password by re-deriving the keypair and comparing the public recipient with the
+        stored one, then caches the derived identity in server memory for one hour. The session is
+        shared by all clients of the process and is lost on restart.
       security: []
       parameters:
         - in: path
@@ -375,13 +457,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/GenericRes'
         '400':
-          description: Invalid vault name.
+          description: Invalid vault name or malformed JSON.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
         '401':
-          description: Invalid password/unauthorized.
+          description: Invalid password.
           content:
             application/json:
               schema:
@@ -392,10 +474,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '404':
+          description: Vault or its config file not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/lock:
     post:
       operationId: lockVault
       summary: Immediately lock a vault
+      description: Removes the vault's in-memory unlock entry, if any.
+      security: []
       parameters:
         - in: path
           name: name
@@ -422,16 +514,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
         '404':
-          description: Vault not found or vault was not unlocked.
+          description: Vault not found, or the vault was not unlocked (`Vault not unlocked`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/list:
     get:
       operationId: listFiles
       summary: List files in an unlocked vault (with metadata)
-      description: Recursively retrieves encrypted file paths (excluding metadata sidecars). Decrypts metadata to include `filename`, `origin`, and reports the encrypted file `size` in bytes for each file. Requires the vault to be unlocked.
+      description: >
+        Recursively retrieves encrypted payload paths (excluding `.meta.age` sidecars) and decrypts
+        each sidecar to include `filename` and `origin`. Reports the encrypted file `size` in bytes.
+        Payloads whose sidecar is missing or cannot be decrypted are silently skipped.
+        Requires the vault to be unlocked.
       parameters:
         - in: path
           name: name
@@ -440,7 +538,7 @@ paths:
             type: string
       responses:
         '200':
-          description: JSON array of file items with metadata summary and file size.
+          description: JSON array of file items with metadata summary and ciphertext size.
           content:
             application/json:
               schema:
@@ -454,7 +552,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
         '401':
-          description: Vault is locked.
+          description: Vault is locked or the unlock window expired.
           content:
             application/json:
               schema:
@@ -465,11 +563,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '404':
+          description: Vault or its config file not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/download/{path}:
     get:
       operationId: downloadFile
       summary: Download and decrypt a file
-      description: "Streams requested encrypted file back to the client decrypted. This endpoint only accepts file paths ending in `.age` (excluding `.meta.age`). Supports HTTP Range requests on the decrypted content. Returns `Accept-Ranges: bytes` header."
+      description: >
+        Streams the requested encrypted file back to the client decrypted. Accepts only paths ending
+        in `.age` (and not `.meta.age`). Supports a single HTTP Range request; the range is resolved
+        against the plaintext size recorded in the sidecar. Always advertises `Accept-Ranges: bytes`.
       parameters:
         - in: path
           name: name
@@ -481,13 +590,13 @@ paths:
           required: true
           schema:
             type: string
-          description: Relative path for the file inside the vault.
+          description: Relative path of the encrypted file inside the vault (must end in `.age`).
         - in: header
           name: Range
           required: false
           schema:
             type: string
-          description: 'HTTP Range header for partial content (e.g. `bytes=0-1023`).'
+          description: 'Single byte range, for example `bytes=0-1023`, `bytes=1024-` or `bytes=-500`. Multi-range requests are not supported.'
       responses:
         '200':
           description: The full decrypted binary file.
@@ -511,7 +620,7 @@ paths:
             Content-Range:
               schema:
                 type: string
-              description: 'Byte range and total size (e.g. `bytes 0-1023/4096`).'
+              description: 'Byte range and plaintext total size (e.g. `bytes 0-1023/34912`).'
             Content-Length:
               schema:
                 type: string
@@ -522,20 +631,19 @@ paths:
             Content-Disposition:
               schema:
                 type: string
-              description: 'Attachment disposition with the resolved filename.'
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
         '400':
-          description: Invalid path or metadata sidecar path provided.
+          description: Invalid path, or a path that is not an encrypted `.age` payload.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
         '401':
-          description: Session locked.
+          description: Vault is locked or the unlock window expired.
           content:
             application/json:
               schema:
@@ -552,17 +660,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
         '416':
-          description: Range not satisfiable.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorRes'
+          $ref: '#/components/responses/RangeNotSatisfiable'
   /inbox/{name}/metadata/{path}:
     get:
       operationId: downloadMetadata
       summary: Get decrypted metadata for a file
-      description: Returns decrypted metadata from the sidecar `.meta.age` associated with an encrypted file path. Includes the encrypted file size on disk as `filesize`.
+      description: >
+        Returns decrypted metadata from the `.meta.age` sidecar associated with an encrypted file
+        path. The response `filesize` is the encrypted file size on disk, which overwrites the
+        plaintext size recorded in the sidecar.
       parameters:
         - in: path
           name: name
@@ -574,22 +683,22 @@ paths:
           required: true
           schema:
             type: string
-          description: Relative path to the encrypted file inside the vault (must end with `.age` and not `.meta.age`).
+          description: Relative path of the encrypted file inside the vault (must end in `.age` and not `.meta.age`).
       responses:
         '200':
-          description: Decrypted metadata as JSON, including filesize.
+          description: Decrypted metadata as JSON, including the ciphertext `filesize`.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/FileMetadata'
         '400':
-          description: Invalid path.
+          description: Invalid path, or a path that is not an encrypted `.age` payload.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
         '401':
-          description: Session locked.
+          description: Vault is locked or the unlock window expired.
           content:
             application/json:
               schema:
@@ -606,11 +715,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/delete/{path}:
     delete:
       operationId: deleteFile
       summary: Delete an encrypted file (requires unlock)
-      description: Deletes the specified encrypted `.age` file and its associated `.meta.age` sidecar (if it exists). Requires the vault to be unlocked.
+      description: >
+        Deletes the specified file and its associated `.meta.age` sidecar (if present). Requires a
+        session entry for the vault; presence is checked, not expiry. No `.age` suffix validation is
+        performed, but the resolved path must stay inside the vault directory.
       parameters:
         - in: path
           name: name
@@ -623,10 +737,10 @@ paths:
           required: true
           schema:
             type: string
-          description: Relative path to the encrypted file inside the vault.
+          description: Relative path of the file inside the vault.
       responses:
         '200':
-          description: File (and metadata sidecar if present) deleted successfully.
+          description: File (and metadata sidecar if present) deleted. Empty body.
         '400':
           description: Invalid name or path.
           content:
@@ -634,7 +748,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
         '403':
-          description: Vault is locked or delete not permitted by vault configuration.
+          description: Vault is locked, or delete not permitted by vault configuration.
           content:
             application/json:
               schema:
@@ -645,11 +759,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/raw/list:
     get:
       operationId: listFilesRaw
       summary: List files in a vault (no unlock required)
-      description: Recursively retrieves encrypted file paths and their sizes on disk. Does NOT decrypt metadata — returns only `path` and `size`. Works regardless of whether the vault is locked or unlocked.
+      description: >
+        Recursively retrieves encrypted payload paths and their ciphertext sizes on disk. Does NOT
+        decrypt metadata and returns only `path` and `size`. Payloads without a `.meta.age` sidecar
+        are skipped. Works regardless of whether the vault is locked or unlocked. Unauthenticated.
       parameters:
         - in: path
           name: name
@@ -658,7 +777,7 @@ paths:
             type: string
       responses:
         '200':
-          description: JSON array of raw file items with path and size.
+          description: JSON array of raw file items with path and ciphertext size.
           content:
             application/json:
               schema:
@@ -678,16 +797,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
         '404':
-          description: Vault not found.
+          description: Vault or its config file not found.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /inbox/{name}/raw/download/{path}:
     get:
       operationId: downloadFileRaw
       summary: Download an encrypted file without decryption
-      description: Streams the encrypted `.age` file as-is without decryption. Works regardless of vault lock state. Supports HTTP Range requests for partial content with efficient seeking.
+      description: >
+        Streams the encrypted `.age` file as-is. Works regardless of vault lock state and supports
+        HTTP Range requests by seeking on disk. Unauthenticated: anyone who can reach the server can
+        read ciphertext.
       parameters:
         - in: path
           name: name
@@ -699,13 +823,13 @@ paths:
           required: true
           schema:
             type: string
-          description: Relative path to the encrypted file inside the vault (must end with `.age`, not `.meta.age`).
+          description: Relative path of the encrypted file inside the vault (must end in `.age` and not `.meta.age`).
         - in: header
           name: Range
           required: false
           schema:
             type: string
-          description: 'HTTP Range header for partial content (e.g. `bytes=0-1023`).'
+          description: 'Single byte range, for example `bytes=0-1023`, `bytes=1024-` or `bytes=-500`.'
       responses:
         '200':
           description: The encrypted binary file as-is.
@@ -721,7 +845,7 @@ paths:
             Content-Disposition:
               schema:
                 type: string
-              description: 'Attachment disposition with the `.age` filename (e.g. `attachment; filename="upload_123.age"`).'
+              description: 'Attachment disposition with the `.age` filename (e.g. `attachment; filename="drop-9f2c....age"`).'
           content:
             application/octet-stream:
               schema:
@@ -733,7 +857,7 @@ paths:
             Content-Range:
               schema:
                 type: string
-              description: 'Byte range and total size (e.g. `bytes 0-1023/4096`).'
+              description: 'Byte range and ciphertext total size (e.g. `bytes 0-1023/35120`).'
             Content-Length:
               schema:
                 type: string
@@ -744,14 +868,13 @@ paths:
             Content-Disposition:
               schema:
                 type: string
-              description: 'Attachment disposition with the `.age` filename.'
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
         '400':
-          description: Invalid path or not an .age file.
+          description: Invalid path, or a path that is not an encrypted `.age` payload.
           content:
             application/json:
               schema:
@@ -768,11 +891,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '416':
+          $ref: '#/components/responses/RangeNotSatisfiable'
   /inbox/{name}/raw/delete/{path}:
     delete:
       operationId: deleteFileRaw
       summary: Delete an encrypted file without requiring unlock
-      description: Deletes the specified encrypted `.age` file and its associated `.meta.age` sidecar (if it exists). Works regardless of vault lock state.
+      description: >
+        Deletes the specified file and its associated `.meta.age` sidecar (if present). Works
+        regardless of vault lock state. Unauthenticated.
       parameters:
         - in: path
           name: name
@@ -785,10 +914,10 @@ paths:
           required: true
           schema:
             type: string
-          description: Relative path to the encrypted file inside the vault (must end with `.age`, not `.meta.age`).
+          description: Relative path of the file inside the vault.
       responses:
         '200':
-          description: File (and metadata sidecar if present) deleted successfully.
+          description: File (and metadata sidecar if present) deleted. Empty body.
         '400':
           description: Invalid name or path.
           content:
@@ -807,3 +936,5 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorRes'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
